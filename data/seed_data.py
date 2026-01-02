@@ -9,8 +9,9 @@ from datetime import datetime, timedelta
 import random
 import uuid
 
-# Add parent directory to path to import app modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add backend directory to path to import app modules
+backend_path = Path(__file__).parent.parent / "backend"
+sys.path.insert(0, str(backend_path))
 
 from app.core.database import get_supabase_client
 
@@ -151,10 +152,10 @@ def generate_products(client, num_products=20):
     # Insert products in batches
     try:
         response = client.table("products").insert(products).execute()
-        print(f"✓ Inserted {len(products)} products")
+        print(f"[OK] Inserted {len(products)} products")
         return [p["id"] for p in products]
     except Exception as e:
-        print(f"✗ Error inserting products: {e}")
+        print(f"[ERROR] Error inserting products: {e}")
         return []
 
 
@@ -175,10 +176,10 @@ def generate_users(client, num_users=10):
     
     try:
         response = client.table("users").insert(users).execute()
-        print(f"✓ Inserted {len(users)} users")
+        print(f"[OK] Inserted {len(users)} users")
         return [u["id"] for u in users]
     except Exception as e:
-        print(f"✗ Error inserting users: {e}")
+        print(f"[ERROR] Error inserting users: {e}")
         return []
 
 
@@ -221,9 +222,9 @@ def generate_events(client, user_ids, product_ids, num_events=100):
             response = client.table("events").insert(batch).execute()
             inserted += len(batch)
         except Exception as e:
-            print(f"✗ Error inserting events batch: {e}")
+            print(f"[ERROR] Error inserting events batch: {e}")
     
-    print(f"✓ Inserted {inserted} events")
+    print(f"[OK] Inserted {inserted} events")
     return inserted
 
 
@@ -234,14 +235,14 @@ def main():
     
     client = get_supabase_client()
     if not client:
-        print("✗ Failed to connect to Supabase. Check your .env file.")
+        print("[ERROR] Failed to connect to Supabase. Check your .env file.")
         sys.exit(1)
     
     # Check if tables exist by trying to query them
     try:
         client.table("products").select("id").limit(1).execute()
     except Exception as e:
-        print(f"✗ Error: Tables may not exist. Run migrations first.")
+        print(f"[ERROR] Tables may not exist. Run migrations first.")
         print(f"  Error: {e}")
         sys.exit(1)
     
@@ -256,7 +257,7 @@ def main():
     generate_events(client, user_ids, product_ids, num_events=100)
     
     print("\n" + "-" * 50)
-    print("✓ Database seeding completed successfully!")
+    print("[OK] Database seeding completed successfully!")
     print(f"  - Products: {len(product_ids)}")
     print(f"  - Users: {len(user_ids)}")
     print(f"  - Events: 100")

@@ -54,7 +54,7 @@ This checklist ensures that AI agents (e.g., Cursor or other code-generating age
 
 ## 6️⃣ Deployment and Infra
 
-- [ ] Local setup uses Docker Compose with Supabase, Redis, FAISS.
+- [ ] Local setup uses Docker Compose with Redis, FAISS. Supabase runs as standalone container.
 - [ ] Cloud deployment uses managed services; no SDKs in core code.
 - [ ] Environment variables control configuration.
 - [ ] No environment-specific hacks in code.

@@ -26,16 +26,14 @@ A unified search and recommendation platform built with FastAPI (Python) backend
 - **uv** for Python virtual environment and package management
 - **concurrently** for running frontend and backend simultaneously
 - **Node.js 22** (managed via nvm)
-- **Supabase CLI** for local development
-- **Docker** for Supabase Local
+- **Docker** for containerized services
 
 ## Prerequisites
 
 - Node.js 22+ (recommended: use [nvm](https://github.com/nvm-sh/nvm))
 - Python 3.11+ (recommended: use [pyenv](https://github.com/pyenv/pyenv))
 - [uv](https://github.com/astral-sh/uv) for Python package management
-- [Supabase CLI](https://supabase.com/docs/guides/cli) for local development
-- Docker and Docker Compose (for Supabase Local)
+- Docker and Docker Compose
 
 ## Quick Start
 
@@ -49,58 +47,34 @@ npm install
 npm run setup:backend
 ```
 
-### 2. Set Up Supabase Local
-
-```bash
-# Install Supabase CLI (if not already installed)
-npm install -g supabase
-
-# Initialize Supabase project
-supabase init
-
-# Start Supabase Local (starts Postgres, API, etc. in Docker)
-supabase start
-
-# Get connection details
-supabase status
-```
-
-The `supabase status` command will show you the local connection details. Copy these to your `.env` files.
-
-### 3. Configure Environment Variables
+### 2. Configure Environment Variables
 
 Create environment files (these are gitignored and won't be committed):
 
 **Root `.env` file** (for backend):
 ```bash
-# Supabase Local Configuration (from: supabase status)
+# Supabase Configuration (external standalone container)
 SUPABASE_URL=http://localhost:54321
-SUPABASE_SERVICE_KEY=your_local_service_role_key_from_supabase_status
+SUPABASE_SERVICE_KEY=your_service_role_key
 ```
 
 **`frontend/.env` file** (for frontend):
 ```bash
-# Supabase Local Configuration
+# Supabase Configuration (external standalone container)
 VITE_SUPABASE_URL=http://localhost:54321
-VITE_SUPABASE_ANON_KEY=your_local_anon_key_from_supabase_status
+VITE_SUPABASE_ANON_KEY=your_anon_key
 
 # Backend API URL
 VITE_API_URL=http://localhost:8000
 ```
 
-**Note:** For production, use your Supabase Cloud project URL and keys instead.
+**Note:** Ensure your Supabase standalone container is running and update the URLs/keys accordingly.
 
-### 4. Run Database Migrations
+### 3. Run Database Migrations
 
-```bash
-# Apply migrations to create tables
-supabase db reset
+Migrations should be applied to your Supabase database. Refer to your Supabase setup documentation for migration commands.
 
-# Or apply migrations manually
-supabase migration up
-```
-
-### 5. Seed the Database
+### 4. Seed the Database
 
 ```bash
 # Run seed script to populate sample data
@@ -111,7 +85,7 @@ python scripts/seed_data.py
 python -m app.services.features.compute
 ```
 
-### 6. Run the Application
+### 5. Run the Application
 
 ```bash
 # Run both frontend and backend simultaneously
@@ -128,12 +102,11 @@ npm run backend
 npm run frontend
 ```
 
-### 7. Access the Application
+### 6. Access the Application
 
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:8000
 - API Docs: http://localhost:8000/docs
-- Supabase Studio: http://localhost:54323 (local database management)
 
 ## Project Structure
 
@@ -334,9 +307,9 @@ pytest tests/
 - **Import errors**: Ensure you're in the `backend/` directory or using the venv Python
 - **Supabase connection fails**: 
   - Check `.env` file has correct `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
-  - Ensure Supabase Local is running: `supabase status`
-  - Restart Supabase Local: `supabase stop && supabase start`
-- **Database migrations fail**: Run `supabase db reset` to reset and reapply migrations
+  - Ensure Supabase standalone container is running and accessible
+  - Verify network connectivity to Supabase container
+- **Database migrations fail**: Ensure migrations are applied to your Supabase database
 
 ### Frontend Issues
 - **Supabase auth not working**: Verify `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `frontend/.env`
@@ -345,7 +318,7 @@ pytest tests/
 - **Port already in use**: Change port in `frontend/vite.config.ts` or kill the process using the port
 
 ### Database Issues
-- **Tables not found**: Run migrations: `supabase db reset`
+- **Tables not found**: Ensure migrations are applied to your Supabase database
 - **No data**: Run seed script: `python backend/scripts/seed_data.py`
 - **Popularity scores are zero**: Run feature computation: `python -m app.services.features.compute`
 

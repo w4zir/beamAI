@@ -7,18 +7,18 @@ version: '3.8'
 services:
   backend:
     environment:
-      # Override with your local Supabase credentials
+      # Override with your Supabase credentials (external standalone container)
       SUPABASE_URL: http://localhost:54321
-      SUPABASE_SERVICE_KEY: your-local-service-key
+      SUPABASE_SERVICE_KEY: your-service-key
     # Enable hot reload for development
     volumes:
       - ./backend:/app
 
   frontend:
     environment:
-      # Override with your local Supabase credentials
+      # Override with your Supabase credentials (external standalone container)
       VITE_SUPABASE_URL: http://localhost:54321
-      VITE_SUPABASE_ANON_KEY: your-local-anon-key
+      VITE_SUPABASE_ANON_KEY: your-anon-key
       VITE_API_URL: http://localhost:8000
     # Enable hot reload for development
     volumes:

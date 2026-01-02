@@ -45,8 +45,7 @@ services:
       dockerfile: Dockerfile
     container_name: beamai-backend
     environment:
-      # For Supabase client compatibility, use HTTP endpoint
-      # Note: For local Docker, you may need to use Supabase Local or adjust connection
+      # Supabase connection (external standalone container)
       SUPABASE_URL: ${SUPABASE_URL:-http://localhost:54321}
       SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-your-service-key}
       # Direct PostgreSQL connection (alternative)
@@ -79,7 +78,8 @@ services:
       dockerfile: Dockerfile
     container_name: beamai-frontend
     environment:
-      VITE_SUPABASE_URL: http://localhost:54321
+      # Supabase connection (external standalone container)
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://localhost:54321}
       VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
       VITE_API_URL: http://localhost:8000
     ports:

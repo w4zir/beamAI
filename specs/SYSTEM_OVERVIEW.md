@@ -5,7 +5,7 @@ This system provides a **unified search and recommendation platform** for an e-c
 
 ## Goals
 - Unified keyword search, semantic search, and recommendations
-- Local-first development (Supabase, Docker)
+- Local-first development (Supabase standalone container, Docker)
 - Cloud-agnostic deployment (AWS, GCP, Azure)
 - 100% open-source technologies
 - Deterministic, explainable ranking
