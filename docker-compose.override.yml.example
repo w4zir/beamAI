@@ -1,0 +1,27 @@
+# Example override file for local development
+# Copy this to docker-compose.override.yml and customize as needed
+# docker-compose.override.yml is automatically loaded by docker-compose
+
+version: '3.8'
+
+services:
+  backend:
+    environment:
+      # Override with your local Supabase credentials
+      SUPABASE_URL: http://localhost:54321
+      SUPABASE_SERVICE_KEY: your-local-service-key
+    # Enable hot reload for development
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    environment:
+      # Override with your local Supabase credentials
+      VITE_SUPABASE_URL: http://localhost:54321
+      VITE_SUPABASE_ANON_KEY: your-local-anon-key
+      VITE_API_URL: http://localhost:8000
+    # Enable hot reload for development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+

@@ -32,8 +32,22 @@ export default function Navbar() {
   return (
     <nav className="p-4 flex gap-4 items-center border-b bg-white shadow-sm">
       <Link to="/dashboard" className="font-bold text-xl text-blue-600 hover:text-blue-700">
-        App
+        BeamAI
       </Link>
+      <div className="flex gap-4 ml-6">
+        <Link 
+          to="/search" 
+          className="text-gray-700 hover:text-blue-600 font-medium text-sm hover:underline"
+        >
+          Search
+        </Link>
+        <Link 
+          to="/recommendations" 
+          className="text-gray-700 hover:text-blue-600 font-medium text-sm hover:underline"
+        >
+          Recommendations
+        </Link>
+      </div>
       <div className="ml-auto flex items-center gap-4">
         <span className="text-sm text-gray-600 hidden sm:inline">{email}</span>
         <button 

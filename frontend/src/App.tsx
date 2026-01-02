@@ -5,6 +5,8 @@ import { supabase } from './api/supabase'
 import Navbar from './components/Navbar'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import Search from './pages/Search'
+import Recommendations from './pages/Recommendations'
 import NotFound from './pages/NotFound'
 
 // Protected Route Component
@@ -51,6 +53,24 @@ function App() {
             <ProtectedRoute>
               <Navbar />
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/search"
+          element={
+            <ProtectedRoute>
+              <Navbar />
+              <Search />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/recommendations"
+          element={
+            <ProtectedRoute>
+              <Navbar />
+              <Recommendations />
             </ProtectedRoute>
           }
         />

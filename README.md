@@ -1,6 +1,6 @@
-# FastAPI + React Starter Template
+# BeamAI - Search & Recommendation System
 
-A modern, production-ready starter template for building full-stack web applications with FastAPI (Python) backend and React (TypeScript) frontend, featuring Supabase authentication.
+A unified search and recommendation platform built with FastAPI (Python) backend and React (TypeScript) frontend, featuring Supabase for database and authentication.
 
 ## Tech Stack
 
@@ -19,18 +19,23 @@ A modern, production-ready starter template for building full-stack web applicat
 - **Uvicorn** ASGI server
 - **Supabase Python Client** for database operations
 - **Pydantic** for data validation
+- **PostgreSQL Full Text Search** for keyword search
+- **Ranking Service** with deterministic scoring
 
 ### Development Tools
 - **uv** for Python virtual environment and package management
 - **concurrently** for running frontend and backend simultaneously
 - **Node.js 22** (managed via nvm)
+- **Supabase CLI** for local development
+- **Docker** for Supabase Local
 
 ## Prerequisites
 
 - Node.js 22+ (recommended: use [nvm](https://github.com/nvm-sh/nvm))
 - Python 3.11+ (recommended: use [pyenv](https://github.com/pyenv/pyenv))
 - [uv](https://github.com/astral-sh/uv) for Python package management
-- A Supabase project ([create one here](https://supabase.com))
+- [Supabase CLI](https://supabase.com/docs/guides/cli) for local development
+- Docker and Docker Compose (for Supabase Local)
 
 ## Quick Start
 
@@ -44,31 +49,69 @@ npm install
 npm run setup:backend
 ```
 
-### 2. Configure Environment Variables
+### 2. Set Up Supabase Local
+
+```bash
+# Install Supabase CLI (if not already installed)
+npm install -g supabase
+
+# Initialize Supabase project
+supabase init
+
+# Start Supabase Local (starts Postgres, API, etc. in Docker)
+supabase start
+
+# Get connection details
+supabase status
+```
+
+The `supabase status` command will show you the local connection details. Copy these to your `.env` files.
+
+### 3. Configure Environment Variables
 
 Create environment files (these are gitignored and won't be committed):
 
 **Root `.env` file** (for backend):
 ```bash
-# Supabase Configuration
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_SERVICE_KEY=your_supabase_service_role_key
+# Supabase Local Configuration (from: supabase status)
+SUPABASE_URL=http://localhost:54321
+SUPABASE_SERVICE_KEY=your_local_service_role_key_from_supabase_status
 ```
 
 **`frontend/.env` file** (for frontend):
 ```bash
-# Supabase Configuration
-VITE_SUPABASE_URL=your_supabase_project_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+# Supabase Local Configuration
+VITE_SUPABASE_URL=http://localhost:54321
+VITE_SUPABASE_ANON_KEY=your_local_anon_key_from_supabase_status
+
+# Backend API URL
+VITE_API_URL=http://localhost:8000
 ```
 
-**Where to find Supabase keys:**
-- Go to your Supabase project dashboard
-- Navigate to Settings → API
-- Copy the `URL` and `anon` key for frontend
-- Copy the `service_role` key for backend (keep this secret!)
+**Note:** For production, use your Supabase Cloud project URL and keys instead.
 
-### 3. Run the Application
+### 4. Run Database Migrations
+
+```bash
+# Apply migrations to create tables
+supabase db reset
+
+# Or apply migrations manually
+supabase migration up
+```
+
+### 5. Seed the Database
+
+```bash
+# Run seed script to populate sample data
+cd backend
+python scripts/seed_data.py
+
+# Compute initial popularity scores
+python -m app.services.features.compute
+```
+
+### 6. Run the Application
 
 ```bash
 # Run both frontend and backend simultaneously
@@ -85,11 +128,12 @@ npm run backend
 npm run frontend
 ```
 
-### 4. Access the Application
+### 7. Access the Application
 
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:8000
 - API Docs: http://localhost:8000/docs
+- Supabase Studio: http://localhost:54323 (local database management)
 
 ## Project Structure
 
@@ -125,6 +169,12 @@ npm run frontend
 
 ## Features
 
+### Search & Recommendations
+- **Keyword Search**: PostgreSQL Full Text Search for product search
+- **Recommendations**: Popularity-based product recommendations
+- **Ranking**: Deterministic ranking using Phase 1 formula (search + popularity + freshness)
+- **Event Tracking**: Track user interactions (views, clicks) for analytics
+
 ### Authentication
 - Email/password sign up and login
 - Google OAuth authentication
@@ -135,14 +185,41 @@ npm run frontend
 ### UI Components
 - Pre-configured shadcn/ui components
 - Responsive design with TailwindCSS
-- Dark mode support (via shadcn/ui)
-- Smooth animations with Framer Motion
+- Search page with real-time results
+- Recommendations page with personalized suggestions
+- Product cards with scores and details
 
 ### Backend
 - FastAPI with automatic API documentation
 - CORS configured for development
 - Health check endpoint
-- Minimal database client setup
+- Search endpoint: `GET /search?q={query}&k={limit}`
+- Recommendations endpoint: `GET /recommend/{user_id}?k={limit}`
+- Event tracking endpoint: `POST /events`
+- Feature computation (popularity scores, freshness scores)
+
+## API Endpoints
+
+### Search
+```
+GET /search?q={query}&user_id={optional}&k={limit}
+```
+Returns ranked search results with scores.
+
+### Recommendations
+```
+GET /recommend/{user_id}?k={limit}
+```
+Returns personalized product recommendations.
+
+### Event Tracking
+```
+POST /events
+Body: { user_id, product_id, event_type, source }
+```
+Tracks user interactions for analytics and feature computation.
+
+See full API documentation at http://localhost:8000/docs
 
 ## Available Scripts
 
@@ -154,6 +231,8 @@ npm run frontend
 ### Backend
 - `npm run setup:backend` - Setup Python virtual environment and install dependencies
 - `npm run backend` - Run FastAPI server with hot reload
+- `python backend/scripts/seed_data.py` - Seed database with sample data
+- `python -m app.services.features.compute` - Compute popularity scores
 
 ### Both
 - `npm run dev:both` - Run both frontend and backend simultaneously
@@ -240,17 +319,35 @@ const { data, error } = await supabase
 3. Deploy with Python 3.11+ runtime
 4. Run: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 
+## Testing
+
+Run integration tests:
+```bash
+cd backend
+pytest tests/
+```
+
 ## Troubleshooting
 
 ### Backend Issues
 - **Virtual environment not found**: Run `npm run setup:backend`
 - **Import errors**: Ensure you're in the `backend/` directory or using the venv Python
-- **Supabase connection fails**: Check `.env` file has correct `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
+- **Supabase connection fails**: 
+  - Check `.env` file has correct `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
+  - Ensure Supabase Local is running: `supabase status`
+  - Restart Supabase Local: `supabase stop && supabase start`
+- **Database migrations fail**: Run `supabase db reset` to reset and reapply migrations
 
 ### Frontend Issues
 - **Supabase auth not working**: Verify `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `frontend/.env`
+- **API calls fail**: Check `VITE_API_URL` is set to `http://localhost:8000` in `frontend/.env`
 - **Build errors**: Clear `node_modules` and reinstall: `rm -rf node_modules && npm install`
 - **Port already in use**: Change port in `frontend/vite.config.ts` or kill the process using the port
+
+### Database Issues
+- **Tables not found**: Run migrations: `supabase db reset`
+- **No data**: Run seed script: `python backend/scripts/seed_data.py`
+- **Popularity scores are zero**: Run feature computation: `python -m app.services.features.compute`
 
 ## License
 
