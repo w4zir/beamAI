@@ -85,6 +85,13 @@ LOG_LEVEL=INFO                    # DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_JSON=true                     # true for JSON output (production), false for console (development)
 ```
 
+**Structured Logging:**
+- The system uses `structlog` for structured JSON logging
+- All logs include: `timestamp`, `level`, `service`, `trace_id`, `request_id`, `user_id` (when available)
+- Logs output to stdout (for containerized environments)
+- Set `LOG_JSON=false` for development (human-readable console output)
+- Set `LOG_JSON=true` for production (JSON format for log aggregation)
+
 Create a `frontend/.env` file:
 
 ```bash
@@ -323,6 +330,23 @@ curl -H "X-Trace-ID: my-custom-trace-123" \
 }
 ```
 
+**Log Events:**
+The system logs the following events:
+- `request_started` - When a request is received
+- `request_completed` - When a request finishes successfully
+- `request_failed` - When a request fails with an error
+- `search_started` - Search query initiated
+- `search_completed` - Search query finished
+- `search_zero_results` - Search returned no results
+- `search_error` - Search encountered an error
+- `recommendation_started` - Recommendation request started
+- `recommendation_completed` - Recommendation request finished
+- `recommendation_zero_results` - Recommendation returned no results
+- `recommendation_error` - Recommendation encountered an error
+- `ranking_started` - Ranking process started
+- `ranking_completed` - Ranking process finished
+- `ranking_product_scored` - Individual product scoring (DEBUG level)
+
 ### 7. Test Feature Computation
 
 Compute popularity scores:
@@ -486,9 +510,11 @@ tail -f backend.log | grep "trace_id"
 ```
 
 **Trace ID correlation:**
-- Every request gets a unique `trace_id` (UUID)
+- Every request gets a unique `trace_id` (UUID v4)
+- Trace ID is extracted from `X-Trace-ID` or `X-Request-ID` headers if present, otherwise generated
 - Trace ID is included in response headers (`X-Trace-ID`)
-- All log entries for a request include the same `trace_id`
+- Every request also gets a unique `request_id` (UUID v4) in `X-Request-ID` header
+- All log entries for a request include the same `trace_id` and `request_id`
 - Use trace ID to correlate logs across services and debug issues
 
 **Example: Find all logs for a specific request:**
@@ -499,6 +525,12 @@ grep "abc123-def456-ghi789" backend.log
 # Or use jq to filter JSON logs
 cat backend.log | jq 'select(.trace_id == "abc123-def456-ghi789")'
 ```
+
+**Trace ID Propagation:**
+- Trace IDs are propagated via HTTP headers (`X-Trace-ID` or `X-Request-ID`)
+- Middleware automatically extracts or generates trace IDs for every request
+- Trace IDs are stored in context variables and automatically included in all log entries
+- User IDs are extracted from query parameters (`user_id`) or headers (`X-User-ID`) and included in logs when available
 
 **Database logs:**
 - Check Supabase logs for query performance
@@ -618,21 +650,30 @@ python -m app.services.features.compute
 - Check `LOG_JSON` environment variable is set to `true`
 - Restart backend after changing environment variables
 - Verify structlog is installed: `pip list | grep structlog`
+- Check that `configure_logging()` is called with `json_output=True` in `app/main.py`
 
 **Problem: Trace ID not appearing in logs**
-- Verify trace ID middleware is enabled (should be automatic)
-- Check response headers include `X-Trace-ID`
+- Verify trace ID middleware (`TraceIDMiddleware`) is enabled in `app/main.py`
+- Check response headers include `X-Trace-ID` and `X-Request-ID`
 - Ensure logging is configured before making requests
+- Verify middleware is added after CORS middleware but before routes
 
 **Problem: Logs missing context fields**
 - Verify structured logging is configured in `app/core/logging.py`
-- Check that context variables are set correctly
-- Ensure `configure_logging()` is called at application startup
+- Check that context variables (`trace_id_var`, `request_id_var`, `user_id_var`) are set correctly
+- Ensure `configure_logging()` is called at application startup in `app/main.py`
+- Verify `add_trace_context` processor is included in the processor chain
 
 **Problem: Cannot find logs by trace ID**
 - Verify logs are being written to stdout (for containerized environments)
 - Check log aggregation tool configuration
-- Ensure JSON format is enabled for log parsing
+- Ensure JSON format is enabled for log parsing (`LOG_JSON=true`)
+- Test trace ID extraction: `curl -H "X-Trace-ID: test-123" http://localhost:8000/health/`
+
+**Problem: User ID not appearing in logs**
+- User ID is only included when provided via query parameter (`?user_id=...`) or header (`X-User-ID`)
+- Check that `set_user_id()` is called in route handlers when user_id is available
+- Verify middleware extracts user_id from query params or headers
 
 ---
 
@@ -677,16 +718,20 @@ tail -f backend.log | jq 'select(.trace_id == "your-trace-id")'
 ```
 
 **Common log events:**
-- `request_started` - Request received
-- `request_completed` - Request finished successfully
-- `request_failed` - Request failed with error
-- `search_started` - Search query initiated
-- `search_completed` - Search query finished
-- `search_zero_results` - Search returned no results
-- `recommendation_started` - Recommendation request started
-- `recommendation_completed` - Recommendation request finished
-- `ranking_started` - Ranking process started
-- `ranking_completed` - Ranking process finished
+- `request_started` - Request received (includes method, path, query_params, client_host)
+- `request_completed` - Request finished successfully (includes status_code, latency_ms)
+- `request_failed` - Request failed with error (includes error, error_type, latency_ms)
+- `search_started` - Search query initiated (includes query, user_id, k)
+- `search_completed` - Search query finished (includes query, user_id, results_count, latency_ms, cache_hit)
+- `search_zero_results` - Search returned no results (includes query, user_id, latency_ms, cache_hit)
+- `search_error` - Search encountered an error (includes query, user_id, error, error_type, latency_ms)
+- `recommendation_started` - Recommendation request started (includes user_id, k)
+- `recommendation_completed` - Recommendation request finished (includes user_id, results_count, latency_ms, cache_hit)
+- `recommendation_zero_results` - Recommendation returned no results (includes user_id, latency_ms, cache_hit)
+- `recommendation_error` - Recommendation encountered an error (includes user_id, error, error_type, latency_ms)
+- `ranking_started` - Ranking process started (includes is_search, user_id, candidates_count, weights)
+- `ranking_completed` - Ranking process finished (includes is_search, user_id, ranked_count, candidates_count)
+- `ranking_product_scored` - Individual product scoring (DEBUG level, includes product_id, final_score, score_breakdown)
 
 ---
 
