@@ -54,7 +54,7 @@ The Docker Compose setup includes:
 Create a `.env` file in the project root with:
 
 ```bash
-# Supabase Configuration (if using Supabase Local)
+# Supabase Configuration (external standalone container)
 SUPABASE_URL=http://localhost:54321
 SUPABASE_SERVICE_KEY=your-service-key
 
@@ -80,19 +80,6 @@ docker-compose exec postgres psql -U postgres -d postgres
 docker-compose exec backend python -m alembic upgrade head
 ```
 
-### Option 2: Using Supabase Local
-
-If you prefer to use Supabase Local (which includes PostgREST API, Auth, Storage, etc.):
-
-1. Install Supabase CLI: `npm install -g supabase`
-2. Start Supabase Local: `supabase start`
-3. Update `SUPABASE_URL` in your `.env` to `http://localhost:54321`
-4. Get your keys from: `supabase status`
-
-Then either:
-- Stop the `postgres` service in docker-compose: `docker-compose stop postgres`
-- Or use Supabase Local's PostgreSQL and update connection strings
-
 ## Running Migrations
 
 Migrations in `supabase/migrations/` are automatically applied when the PostgreSQL container starts for the first time.
@@ -100,10 +87,7 @@ Migrations in `supabase/migrations/` are automatically applied when the PostgreS
 To manually run migrations:
 
 ```bash
-# Using Supabase CLI (if using Supabase Local)
-supabase db reset
-
-# Or connect to Docker PostgreSQL and run SQL
+# Connect to Docker PostgreSQL and run SQL
 docker-compose exec postgres psql -U postgres -d postgres -f /docker-entrypoint-initdb.d/001_create_tables.sql
 ```
 
@@ -176,6 +160,7 @@ services:
 1. Check PostgreSQL is healthy: `docker-compose ps`
 2. Verify environment variables: `docker-compose exec backend env | grep SUPABASE`
 3. Check logs: `docker-compose logs postgres`
+4. Ensure Supabase standalone container is running and accessible
 
 ### Volume Permissions
 

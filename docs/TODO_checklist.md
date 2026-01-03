@@ -2,19 +2,17 @@
 
 This checklist implements a minimal working version of the search and recommendation system locally, following the specifications in the `/specs` directory and using features defined in [FEATURE_DEFINITIONS.md](../specs/FEATURE_DEFINITIONS.md).
 
-## Database: Supabase Local (Docker Compose)
+## Database: Supabase (Standalone Container)
 
-We're using **Supabase Local** for local development, which runs Postgres in Docker via Supabase CLI.
+We're using **Supabase** as a standalone container for local development.
 
 ---
 
 ## Phase 1: Database Setup & Schema ✅
 
-**Goal**: Set up Supabase Local and create canonical tables
+**Goal**: Set up Supabase and create canonical tables
 
-- [ ] Install Supabase CLI (if not installed)
-- [ ] Initialize Supabase project: `supabase init`
-- [ ] Start Supabase Local: `supabase start`
+- [ ] Ensure Supabase standalone container is running
 - [ ] Create migration `supabase/migrations/001_create_tables.sql`:
   - [ ] `products` table (id TEXT PRIMARY KEY, name TEXT, description TEXT, category TEXT, price NUMERIC, popularity_score FLOAT DEFAULT 0, created_at TIMESTAMP)
   - [ ] `users` table (id TEXT PRIMARY KEY, created_at TIMESTAMP)
@@ -28,8 +26,8 @@ We're using **Supabase Local** for local development, which runs Postgres in Doc
   - [ ] Generate synthetic products (10-20 products across categories)
   - [ ] Create sample users (5-10 users)
   - [ ] Generate sample events (views, add_to_cart, purchases)
-- [ ] Update `.env` with local Supabase connection details
-- [ ] Run migrations: `supabase db reset` or `supabase migration up`
+- [ ] Update `.env` with Supabase connection details
+- [ ] Run migrations on Supabase database
 - [ ] Run seed script to populate initial data
 
 **Files Created**:
@@ -297,7 +295,7 @@ We're using **Supabase Local** for local development, which runs Postgres in Doc
 **Goal**: Ensure basic end-to-end flow works
 
 - [ ] Manual testing checklist:
-  - [ ] Start Supabase Local: `supabase start`
+  - [ ] Ensure Supabase standalone container is running
   - [ ] Start backend: `npm run backend`
   - [ ] Start frontend: `npm run frontend`
   - [ ] Search returns results
@@ -310,7 +308,7 @@ We're using **Supabase Local** for local development, which runs Postgres in Doc
   - [ ] Test search with valid query
   - [ ] Test search with empty query
 - [ ] Update README (`README.md`):
-  - [ ] Document Supabase Local setup steps
+  - [ ] Document Supabase setup (standalone container)
   - [ ] Document how to run migrations
   - [ ] Document how to seed data
   - [ ] Document API endpoints
@@ -333,8 +331,8 @@ We're using **Supabase Local** for local development, which runs Postgres in Doc
 - `python-dateutil` (for date handling)
 
 **Infrastructure**:
-- Supabase CLI (install via npm: `npm install -g supabase` or via package manager)
-- Docker & Docker Compose (for Supabase Local)
+- Supabase standalone container
+- Docker & Docker Compose (for backend services)
 
 ---
 
@@ -353,7 +351,7 @@ We're using **Supabase Local** for local development, which runs Postgres in Doc
 
 ## Notes
 
-- **Database**: Using Supabase Local (Postgres in Docker)
+- **Database**: Using Supabase (standalone container)
 - **Features**: Following [FEATURE_DEFINITIONS.md](../specs/FEATURE_DEFINITIONS.md) strictly
 - **Architecture**: Separation of concerns - retrieval separate from ranking
 - **Phase 1 Scope**: No collaborative filtering, no semantic search (keyword only)
