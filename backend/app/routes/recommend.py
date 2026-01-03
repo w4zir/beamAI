@@ -3,16 +3,17 @@ Recommendation endpoint for product recommendations.
 
 GET /recommend/{user_id}?k={int}
 """
-from fastapi import APIRouter, Path, Query, HTTPException
+import time
+from fastapi import APIRouter, Path, Query, HTTPException, Request
 from typing import List, Optional
 from pydantic import BaseModel
-import logging
 
+from app.core.logging import get_logger, set_user_id
 from app.services.recommendation.popularity import get_popularity_recommendations
 from app.services.ranking.score import rank_products
 from app.core.database import get_supabase_client
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -26,6 +27,7 @@ class RecommendResult(BaseModel):
 
 @router.get("/{user_id}", response_model=List[RecommendResult])
 async def recommend(
+    request: Request,
     user_id: str = Path(..., description="User ID"),
     k: int = Query(10, ge=1, le=100, description="Number of recommendations to return")
 ):
@@ -34,19 +36,40 @@ async def recommend(
     
     Returns ranked results using Phase 1 ranking formula.
     """
+    start_time = time.time()
+    cache_hit = False  # TODO: Implement caching in Phase 2
+    
+    # Set user_id in context
+    set_user_id(user_id)
+    
     try:
+        logger.info(
+            "recommendation_started",
+            user_id=user_id,
+            k=k,
+        )
+        
         # Verify user exists
         client = get_supabase_client()
         if client:
             user_check = client.table("users").select("id").eq("id", user_id).limit(1).execute()
             if not user_check.data:
-                logger.warning(f"User {user_id} not found, but continuing with recommendations")
+                logger.warning(
+                    "recommendation_user_not_found",
+                    user_id=user_id,
+                )
         
         # Get candidates from recommendation service
         candidate_ids = get_popularity_recommendations(user_id=user_id, limit=k * 2)
         
         if not candidate_ids:
-            logger.warning(f"No recommendations found for user {user_id}")
+            latency_ms = int((time.time() - start_time) * 1000)
+            logger.info(
+                "recommendation_zero_results",
+                user_id=user_id,
+                latency_ms=latency_ms,
+                cache_hit=cache_hit,
+            )
             return []
         
         # Convert to candidates format (product_id, search_score=0 for recommendations)
@@ -66,7 +89,12 @@ async def recommend(
                 for product_id, final_score, breakdown in ranked[:k]
             ]
         except Exception as ranking_error:
-            logger.warning(f"Ranking failed, falling back to popularity sort: {ranking_error}")
+            logger.warning(
+                "recommendation_ranking_failed",
+                user_id=user_id,
+                error=str(ranking_error),
+                error_type=type(ranking_error).__name__,
+            )
             # Fallback: use popularity scores
             if client:
                 products = client.table("products").select("id, popularity_score").in_("id", candidate_ids).execute()
@@ -86,10 +114,29 @@ async def recommend(
                 for product_id in sorted_candidates[:k]
             ]
         
-        logger.info(f"Recommendations for user {user_id} returned {len(results)} results")
+        latency_ms = int((time.time() - start_time) * 1000)
+        logger.info(
+            "recommendation_completed",
+            user_id=user_id,
+            results_count=len(results),
+            latency_ms=latency_ms,
+            cache_hit=cache_hit,
+        )
+        
         return results
         
+    except HTTPException:
+        # Re-raise HTTP exceptions (they're already properly formatted)
+        raise
     except Exception as e:
-        logger.error(f"Error in recommend endpoint: {e}", exc_info=True)
+        latency_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "recommendation_error",
+            user_id=user_id,
+            error=str(e),
+            error_type=type(e).__name__,
+            latency_ms=latency_ms,
+            exc_info=True,
+        )
         raise HTTPException(status_code=500, detail="Internal server error during recommendation")
 

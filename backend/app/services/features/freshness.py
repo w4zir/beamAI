@@ -7,12 +7,13 @@ According to FEATURE_DEFINITIONS.md:
 - Computation: Time decay from created_at
 - Used by: Ranking service only (computed on-demand, not stored)
 """
-import logging
 from datetime import datetime, timezone
 from typing import Optional
 import numpy as np
 
-logger = logging.getLogger(__name__)
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Half-life in days (products lose half their freshness after this many days)
 FRESHNESS_HALF_LIFE_DAYS = 90.0
@@ -81,6 +82,11 @@ def compute_freshness_score_from_string(created_at_str: str, reference_time: Opt
         
         return compute_freshness_score(created_at, reference_time)
     except (ValueError, AttributeError) as e:
-        logger.warning(f"Failed to parse created_at '{created_at_str}': {e}")
+        logger.warning(
+            "freshness_score_parse_failed",
+            created_at_str=created_at_str,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         return 0.0
 

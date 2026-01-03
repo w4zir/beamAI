@@ -3,10 +3,10 @@ Feature computation orchestrator.
 
 Runs batch jobs to compute and update features in the database.
 """
-import logging
+from app.core.logging import configure_logging, get_logger
 from app.services.features.popularity import compute_and_update_popularity_scores
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def run_all_feature_computations():
@@ -15,23 +15,27 @@ def run_all_feature_computations():
     
     This should be called periodically (e.g., via cron job or scheduled task).
     """
-    logger.info("=" * 50)
-    logger.info("Starting feature computation batch job")
-    logger.info("=" * 50)
+    logger.info("feature_computation_batch_started")
     
     # Compute and update popularity scores
     try:
         updated_count = compute_and_update_popularity_scores()
-        logger.info(f"✓ Popularity scores: Updated {updated_count} products")
+        logger.info(
+            "feature_computation_popularity_completed",
+            updated_count=updated_count,
+        )
     except Exception as e:
-        logger.error(f"✗ Error computing popularity scores: {e}", exc_info=True)
+        logger.error(
+            "feature_computation_popularity_error",
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
+        )
     
     # Note: freshness_score is computed on-demand in ranking service,
     # so no batch job needed for it.
     
-    logger.info("=" * 50)
-    logger.info("Feature computation batch job completed")
-    logger.info("=" * 50)
+    logger.info("feature_computation_batch_completed")
 
 
 if __name__ == "__main__":
@@ -42,11 +46,8 @@ if __name__ == "__main__":
     # Add parent directory to path
     sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
     
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    # Configure structured logging
+    configure_logging(log_level="INFO", json_output=False)
     
     run_all_feature_computations()
 

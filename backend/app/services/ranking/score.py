@@ -13,11 +13,11 @@ For search: search_score = search_keyword_score
 For recommendations: search_score = 0
 cf_score = 0 (no collaborative filtering in Phase 1)
 """
-import logging
 from typing import List, Tuple, Dict, Optional
+from app.core.logging import get_logger
 from app.services.ranking.features import get_product_features
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Phase 1 weights (global)
 WEIGHTS = {
@@ -74,7 +74,21 @@ def rank_products(
         breakdown contains individual feature scores for explainability
     """
     if not candidates:
+        logger.info(
+            "ranking_started",
+            is_search=is_search,
+            user_id=user_id,
+            candidates_count=0,
+        )
         return []
+    
+    logger.info(
+        "ranking_started",
+        is_search=is_search,
+        user_id=user_id,
+        candidates_count=len(candidates),
+        weights=WEIGHTS,
+    )
     
     # Extract product IDs and search scores
     product_ids = [product_id for product_id, _ in candidates]
@@ -84,7 +98,12 @@ def rank_products(
     features = get_product_features(product_ids)
     
     if not features:
-        logger.warning("No features retrieved, returning candidates as-is")
+        logger.warning(
+            "ranking_no_features",
+            is_search=is_search,
+            user_id=user_id,
+            candidates_count=len(candidates),
+        )
         # Fallback: return candidates sorted by search_score
         candidates.sort(key=lambda x: x[1], reverse=True)
         return [
@@ -97,7 +116,12 @@ def rank_products(
     
     for product_id, search_score in candidates:
         if product_id not in features:
-            logger.warning(f"Features not found for product {product_id}, skipping")
+            logger.warning(
+                "ranking_product_features_missing",
+                product_id=product_id,
+                is_search=is_search,
+                user_id=user_id,
+            )
             continue
         
         product_features = features[product_id]
@@ -127,11 +151,32 @@ def rank_products(
             "freshness_score": freshness_score
         }
         
+        # Log ranking for each product
+        logger.debug(
+            "ranking_product_scored",
+            product_id=product_id,
+            final_score=final_score,
+            score_breakdown=breakdown,
+            feature_values={
+                "popularity_score": popularity_score,
+                "freshness_score": freshness_score,
+            },
+            is_search=is_search,
+            user_id=user_id,
+        )
+        
         ranked_results.append((product_id, final_score, breakdown))
     
     # Sort by final_score descending
     ranked_results.sort(key=lambda x: x[1], reverse=True)
     
-    logger.info(f"Ranked {len(ranked_results)} products")
+    logger.info(
+        "ranking_completed",
+        is_search=is_search,
+        user_id=user_id,
+        ranked_count=len(ranked_results),
+        candidates_count=len(candidates),
+    )
+    
     return ranked_results
 

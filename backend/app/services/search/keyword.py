@@ -6,12 +6,12 @@ According to SEARCH_DESIGN.md:
 - Uses Postgres FTS with GIN index on search_vector
 - Returns candidates with search_keyword_score
 """
-import logging
 import re
 from typing import List, Tuple
+from app.core.logging import get_logger
 from app.core.database import get_supabase_client
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def normalize_query(query: str) -> str:
@@ -65,14 +65,14 @@ def search_keywords(query: str, limit: int = 50) -> List[Tuple[str, float]]:
     """
     client = get_supabase_client()
     if not client:
-        logger.error("Failed to get Supabase client")
+        logger.error("keyword_search_db_connection_failed")
         return []
     
     # Normalize query
     normalized_query = normalize_query(query)
     
     if not normalized_query:
-        logger.warning("Empty query after normalization")
+        logger.warning("keyword_search_query_empty_after_normalization", original_query=query)
         return []
     
     try:
@@ -148,11 +148,22 @@ def search_keywords(query: str, limit: int = 50) -> List[Tuple[str, float]]:
         # Limit results
         results = results[:limit]
         
-        logger.info(f"Keyword search for '{query}' returned {len(results)} results")
+        logger.info(
+            "keyword_search_completed",
+            query=query,
+            normalized_query=normalized_query,
+            results_count=len(results),
+        )
         return results
         
     except Exception as e:
-        logger.error(f"Error in keyword search: {e}", exc_info=True)
+        logger.error(
+            "keyword_search_error",
+            query=query,
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
+        )
         return []
 
 

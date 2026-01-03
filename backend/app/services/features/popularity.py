@@ -5,11 +5,11 @@ According to FEATURE_DEFINITIONS.md:
 - Weighted count: purchase=3, add_to_cart=2, view=1
 - Computed: Offline batch
 """
-import logging
 from typing import Dict, List
+from app.core.logging import get_logger
 from app.core.database import get_supabase_client
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Event type weights as per specification
 EVENT_WEIGHTS = {
@@ -28,7 +28,7 @@ def compute_popularity_scores() -> Dict[str, float]:
     """
     client = get_supabase_client()
     if not client:
-        logger.error("Failed to get Supabase client")
+        logger.error("popularity_computation_db_connection_failed")
         return {}
     
     try:
@@ -36,7 +36,7 @@ def compute_popularity_scores() -> Dict[str, float]:
         events_response = client.table("events").select("product_id, event_type").execute()
         
         if not events_response.data:
-            logger.warning("No events found in database")
+            logger.warning("popularity_computation_no_events")
             return {}
         
         # Aggregate scores by product
@@ -55,11 +55,20 @@ def compute_popularity_scores() -> Dict[str, float]:
         # Normalize scores (optional: can be adjusted based on business needs)
         # For now, we'll use raw weighted counts
         
-        logger.info(f"Computed popularity scores for {len(product_scores)} products")
+        logger.info(
+            "popularity_scores_computed",
+            products_count=len(product_scores),
+            events_count=len(events_response.data),
+        )
         return product_scores
         
     except Exception as e:
-        logger.error(f"Error computing popularity scores: {e}", exc_info=True)
+        logger.error(
+            "popularity_computation_error",
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
+        )
         return {}
 
 
@@ -76,7 +85,7 @@ def update_popularity_scores_in_db(scores: Dict[str, float]) -> int:
     """
     client = get_supabase_client()
     if not client:
-        logger.error("Failed to get Supabase client")
+        logger.error("popularity_update_db_connection_failed")
         return 0
     
     if not scores:
@@ -94,14 +103,23 @@ def update_popularity_scores_in_db(scores: Dict[str, float]) -> int:
         
         missing_products = set(product_ids_list) - existing_product_ids
         if missing_products:
-            logger.warning(f"Skipping {len(missing_products)} product(s) referenced in events but not in products table: {list(missing_products)[:5]}...")
+            logger.warning(
+                "popularity_update_missing_products",
+                missing_count=len(missing_products),
+                sample_missing=list(missing_products)[:5],
+            )
         
         if not valid_scores:
-            logger.warning("No valid products to update")
+            logger.warning("popularity_update_no_valid_products")
             return 0
         
     except Exception as e:
-        logger.error(f"Error checking existing products: {e}", exc_info=True)
+        logger.error(
+            "popularity_update_check_error",
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
+        )
         return 0
     
     updated = 0
@@ -126,9 +144,19 @@ def update_popularity_scores_in_db(scores: Dict[str, float]) -> int:
                     updated += 1
                     
         except Exception as e:
-            logger.error(f"Error updating batch {i//batch_size + 1}: {e}", exc_info=True)
+            logger.error(
+                "popularity_update_batch_error",
+                batch_number=i//batch_size + 1,
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
     
-    logger.info(f"Updated popularity_score for {updated} products")
+    logger.info(
+        "popularity_scores_updated",
+        updated_count=updated,
+        total_count=len(valid_scores),
+    )
     return updated
 
 
@@ -139,14 +167,17 @@ def compute_and_update_popularity_scores() -> int:
     Returns:
         Number of products updated
     """
-    logger.info("Starting popularity score computation...")
+    logger.info("popularity_computation_started")
     scores = compute_popularity_scores()
     
     if not scores:
-        logger.warning("No scores computed, skipping update")
+        logger.warning("popularity_computation_no_scores")
         return 0
     
     updated = update_popularity_scores_in_db(scores)
-    logger.info(f"Popularity score computation completed. Updated {updated} products.")
+    logger.info(
+        "popularity_computation_completed",
+        updated_count=updated,
+    )
     return updated
 
