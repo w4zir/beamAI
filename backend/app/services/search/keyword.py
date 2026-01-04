@@ -8,6 +8,7 @@ According to SEARCH_DESIGN.md:
 """
 import re
 from typing import List, Tuple
+import httpx
 from app.core.logging import get_logger
 from app.core.database import get_supabase_client
 
@@ -156,14 +157,49 @@ def search_keywords(query: str, limit: int = 50) -> List[Tuple[str, float]]:
         )
         return results
         
-    except Exception as e:
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        # Connection errors - Supabase is likely not running
+        error_msg = str(e)
+        is_connection_refused = "refused" in error_msg.lower() or "actively refused" in error_msg.lower()
+        
         logger.error(
-            "keyword_search_error",
+            "keyword_search_connection_error",
             query=query,
-            error=str(e),
+            error=error_msg,
             error_type=type(e).__name__,
-            exc_info=True,
+            is_connection_refused=is_connection_refused,
+            message="Supabase connection failed. Ensure Supabase is running at the configured URL.",
+            suggestion="Check if Supabase is running: docker ps | grep supabase or supabase status" if is_connection_refused else "Check your SUPABASE_URL and network connectivity",
         )
+        return []
+    except Exception as e:
+        # Check if it's a connection-related error even if not httpx exception
+        error_msg = str(e)
+        error_type_name = type(e).__name__
+        is_connection_error = (
+            "ConnectError" in error_type_name or
+            "ConnectionError" in error_type_name or
+            "refused" in error_msg.lower() or
+            "actively refused" in error_msg.lower()
+        )
+        
+        if is_connection_error:
+            logger.error(
+                "keyword_search_connection_error",
+                query=query,
+                error=error_msg,
+                error_type=error_type_name,
+                message="Database connection failed. Ensure Supabase is running.",
+                suggestion="Check if Supabase is running: docker ps | grep supabase or supabase status",
+            )
+        else:
+            logger.error(
+                "keyword_search_error",
+                query=query,
+                error=error_msg,
+                error_type=error_type_name,
+                exc_info=True,
+            )
         return []
 
 
