@@ -9,6 +9,10 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from app.core.logging import get_logger, set_user_id
+from app.core.metrics import (
+    record_search_zero_result,
+    record_ranking_score,
+)
 from app.services.recommendation.popularity import get_popularity_recommendations
 from app.services.ranking.score import rank_products
 from app.core.database import get_supabase_client
@@ -37,7 +41,7 @@ async def recommend(
     Returns ranked results using Phase 1 ranking formula.
     """
     start_time = time.time()
-    cache_hit = False  # TODO: Implement caching in Phase 2
+    # TODO: Implement caching in Phase 2 - cache hits/misses will be recorded when implemented
     
     # Set user_id in context
     set_user_id(user_id)
@@ -64,11 +68,12 @@ async def recommend(
         
         if not candidate_ids:
             latency_ms = int((time.time() - start_time) * 1000)
+            # Record zero-result metric (for recommendations, query is None)
+            record_search_zero_result(query=None)
             logger.info(
                 "recommendation_zero_results",
                 user_id=user_id,
                 latency_ms=latency_ms,
-                cache_hit=cache_hit,
             )
             return []
         
@@ -79,15 +84,18 @@ async def recommend(
         try:
             ranked = rank_products(candidates, is_search=False, user_id=user_id)
             
-            # Format results
-            results = [
-                RecommendResult(
-                    product_id=product_id,
-                    score=final_score,
-                    reason=f"Ranked score: {final_score:.3f} (popularity: {breakdown['popularity_score']:.3f}, freshness: {breakdown['freshness_score']:.3f})"
+            # Format results and record ranking scores
+            results = []
+            for product_id, final_score, breakdown in ranked[:k]:
+                # Record ranking score for distribution analysis
+                record_ranking_score(product_id=product_id, score=final_score)
+                results.append(
+                    RecommendResult(
+                        product_id=product_id,
+                        score=final_score,
+                        reason=f"Ranked score: {final_score:.3f} (popularity: {breakdown['popularity_score']:.3f}, freshness: {breakdown['freshness_score']:.3f})"
+                    )
                 )
-                for product_id, final_score, breakdown in ranked[:k]
-            ]
         except Exception as ranking_error:
             logger.warning(
                 "recommendation_ranking_failed",
@@ -120,7 +128,6 @@ async def recommend(
             user_id=user_id,
             results_count=len(results),
             latency_ms=latency_ms,
-            cache_hit=cache_hit,
         )
         
         return results

@@ -10,6 +10,10 @@ from typing import Optional, List
 from pydantic import BaseModel
 
 from app.core.logging import get_logger, set_user_id
+from app.core.metrics import (
+    record_search_zero_result,
+    record_ranking_score,
+)
 from app.services.search.keyword import search_keywords
 from app.services.search.hybrid import hybrid_search
 from app.services.search.semantic import get_semantic_search_service
@@ -43,7 +47,7 @@ async def search(
     """
     start_time = time.time()
     query = q.strip() if q else ""
-    cache_hit = False  # TODO: Implement caching in Phase 2
+    # TODO: Implement caching in Phase 2 - cache hits/misses will be recorded when implemented
     
     # Set user_id in context if provided
     if user_id:
@@ -81,12 +85,13 @@ async def search(
         
         if not candidates:
             latency_ms = int((time.time() - start_time) * 1000)
+            # Record zero-result metric
+            record_search_zero_result(query=query)
             logger.info(
                 "search_zero_results",
                 query=query,
                 user_id=user_id,
                 latency_ms=latency_ms,
-                cache_hit=cache_hit,
             )
             return []
         
@@ -94,15 +99,18 @@ async def search(
         try:
             ranked = rank_products(candidates, is_search=True, user_id=user_id)
             
-            # Format results
-            results = [
-                SearchResult(
-                    product_id=product_id,
-                    score=final_score,
-                    reason=f"Ranked score: {final_score:.3f} (search: {breakdown['search_score']:.3f}, popularity: {breakdown['popularity_score']:.3f}, freshness: {breakdown['freshness_score']:.3f})"
+            # Format results and record ranking scores
+            results = []
+            for product_id, final_score, breakdown in ranked[:k]:
+                # Record ranking score for distribution analysis
+                record_ranking_score(product_id=product_id, score=final_score)
+                results.append(
+                    SearchResult(
+                        product_id=product_id,
+                        score=final_score,
+                        reason=f"Ranked score: {final_score:.3f} (search: {breakdown['search_score']:.3f}, popularity: {breakdown['popularity_score']:.3f}, freshness: {breakdown['freshness_score']:.3f})"
+                    )
                 )
-                for product_id, final_score, breakdown in ranked[:k]
-            ]
         except Exception as ranking_error:
             logger.warning(
                 "search_ranking_failed",
@@ -128,7 +136,6 @@ async def search(
             user_id=user_id,
             results_count=len(results),
             latency_ms=latency_ms,
-            cache_hit=cache_hit,
             use_hybrid=use_hybrid,
         )
         
