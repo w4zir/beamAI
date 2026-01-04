@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from .core.logging import configure_logging, get_logger, get_trace_id
 from .core.middleware import TraceIDMiddleware
 from .routes import health, search, recommend, events
+from .services.search.semantic import initialize_semantic_search
 
 # Configure structured logging
 # Use JSON output in production (containerized), console output in development
@@ -32,6 +33,27 @@ app.add_middleware(
 
 # Add trace ID middleware (must be after CORS middleware)
 app.add_middleware(TraceIDMiddleware)
+
+
+# Startup event: Initialize semantic search
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on application startup."""
+    logger.info("app_startup_started")
+    
+    # Initialize semantic search (loads FAISS index if available)
+    # This will gracefully fail if index is not available, falling back to keyword-only search
+    semantic_initialized = initialize_semantic_search()
+    
+    if semantic_initialized:
+        logger.info("app_startup_semantic_search_ready")
+    else:
+        logger.info(
+            "app_startup_semantic_search_unavailable",
+            message="Semantic search not available. Using keyword search only. Run build_faiss_index.py to enable semantic search.",
+        )
+    
+    logger.info("app_startup_completed")
 
 
 # Error handlers

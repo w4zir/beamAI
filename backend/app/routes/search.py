@@ -1,8 +1,9 @@
 """
-Search endpoint for keyword search.
+Search endpoint for keyword and hybrid search.
 
 GET /search?q={query}&user_id={optional}&k={int}
 """
+import os
 import time
 from fastapi import APIRouter, Query, HTTPException, Request
 from typing import Optional, List
@@ -10,6 +11,8 @@ from pydantic import BaseModel
 
 from app.core.logging import get_logger, set_user_id
 from app.services.search.keyword import search_keywords
+from app.services.search.hybrid import hybrid_search
+from app.services.search.semantic import get_semantic_search_service
 from app.services.ranking.score import rank_products
 
 logger = get_logger(__name__)
@@ -32,9 +35,11 @@ async def search(
     k: int = Query(10, ge=1, le=100, description="Number of results to return")
 ):
     """
-    Search for products using keyword search with ranking.
+    Search for products using keyword or hybrid search with ranking.
     
     Returns ranked results using Phase 1 ranking formula.
+    Uses hybrid search (keyword + semantic) if ENABLE_SEMANTIC_SEARCH=true and semantic search is available.
+    Otherwise falls back to keyword search only.
     """
     start_time = time.time()
     query = q.strip() if q else ""
@@ -52,15 +57,27 @@ async def search(
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
     
     try:
+        # Check feature flag for semantic search
+        enable_semantic = os.getenv("ENABLE_SEMANTIC_SEARCH", "false").lower() == "true"
+        semantic_service = get_semantic_search_service()
+        semantic_available = semantic_service and semantic_service.is_available()
+        use_hybrid = enable_semantic and semantic_available
+        
         logger.info(
             "search_started",
             query=query,
             user_id=user_id,
             k=k,
+            enable_semantic=enable_semantic,
+            semantic_available=semantic_available,
+            use_hybrid=use_hybrid,
         )
         
-        # Get candidates from search service
-        candidates = search_keywords(query, limit=k * 2)
+        # Get candidates from search service (hybrid or keyword only)
+        if use_hybrid:
+            candidates = hybrid_search(query, limit=k * 2)
+        else:
+            candidates = search_keywords(query, limit=k * 2)
         
         if not candidates:
             latency_ms = int((time.time() - start_time) * 1000)
@@ -112,6 +129,7 @@ async def search(
             results_count=len(results),
             latency_ms=latency_ms,
             cache_hit=cache_hit,
+            use_hybrid=use_hybrid,
         )
         
         return results
