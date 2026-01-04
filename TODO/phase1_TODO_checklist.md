@@ -100,37 +100,37 @@
 - [x] Test metrics endpoint returns valid Prometheus format
 
 ### Grafana Dashboards
-- [ ] Set up Grafana instance (or configure access)
-- [ ] Create dashboard: Service Health Overview
-  - [ ] Request rate per endpoint
-  - [ ] Error rate per endpoint
-  - [ ] Latency percentiles (p50, p95, p99)
-  - [ ] CPU and memory usage
-- [ ] Create dashboard: Search Performance
-  - [ ] Search request rate
-  - [ ] Search latency (p50, p95, p99)
-  - [ ] Search error rate
-  - [ ] Zero-result rate
-  - [ ] Cache hit rate for searches
-- [ ] Create dashboard: Recommendation Performance
-  - [ ] Recommendation request rate
-  - [ ] Recommendation latency (p50, p95, p99)
-  - [ ] Recommendation error rate
-  - [ ] Cache hit rate for recommendations
-- [ ] Create dashboard: Database Health
-  - [ ] Connection pool usage
-  - [ ] Query latency
-  - [ ] Connection pool exhaustion alerts
-- [ ] Create dashboard: Cache Performance
-  - [ ] Cache hit rate by type
-  - [ ] Cache miss rate by type
-  - [ ] Cache operation latency
+- [x] Set up Grafana instance (or configure access)
+- [x] Create dashboard: Service Health Overview
+  - [x] Request rate per endpoint
+  - [x] Error rate per endpoint
+  - [x] Latency percentiles (p50, p95, p99)
+  - [x] CPU and memory usage
+- [x] Create dashboard: Search Performance
+  - [x] Search request rate
+  - [x] Search latency (p50, p95, p99)
+  - [x] Search error rate
+  - [x] Zero-result rate
+  - [x] Cache hit rate for searches
+- [x] Create dashboard: Recommendation Performance
+  - [x] Recommendation request rate
+  - [x] Recommendation latency (p50, p95, p99)
+  - [x] Recommendation error rate
+  - [x] Cache hit rate for recommendations
+- [x] Create dashboard: Database Health
+  - [x] Connection pool usage
+  - [x] Query latency
+  - [x] Connection pool exhaustion alerts
+- [x] Create dashboard: Cache Performance
+  - [x] Cache hit rate by type
+  - [x] Cache miss rate by type
+  - [x] Cache operation latency
 
 ### Testing
 - [x] Write unit tests for metrics collection
 - [x] Verify metrics are correctly incremented
 - [x] Test metrics endpoint returns expected format
-- [ ] Verify Grafana dashboards display data correctly (requires Grafana setup)
+- [x] Verify Grafana dashboards display data correctly (requires Grafana setup)
 
 ---
 
