@@ -5,7 +5,8 @@ from fastapi.responses import JSONResponse
 
 from .core.logging import configure_logging, get_logger, get_trace_id
 from .core.middleware import TraceIDMiddleware
-from .routes import health, search, recommend, events
+from .core.metrics import record_http_request
+from .routes import health, search, recommend, events, metrics
 
 # Configure structured logging
 # Use JSON output in production (containerized), console output in development
@@ -38,7 +39,21 @@ app.add_middleware(TraceIDMiddleware)
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """Handle HTTP exceptions."""
+    import time
+    # Get start time from request state (set by middleware)
+    start_time = getattr(request.state, "start_time", time.time())
+    duration = time.time() - start_time
+    
     trace_id = get_trace_id()
+    
+    # Record metrics for HTTP exceptions (4xx errors)
+    record_http_request(
+        method=request.method,
+        endpoint=request.url.path,
+        status_code=exc.status_code,
+        duration_seconds=duration,
+    )
+    
     logger.warning(
         "http_exception",
         status_code=exc.status_code,
@@ -80,6 +95,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 app.include_router(health.router, prefix="/health", tags=["Health"])
 app.include_router(search.router, prefix="/search", tags=["Search"])
 app.include_router(recommend.router, prefix="/recommend", tags=["Recommendations"])
-app.include_router(events.router, prefix="/events", tags=["Events"]) 
+app.include_router(events.router, prefix="/events", tags=["Events"])
+app.include_router(metrics.router, prefix="/metrics", tags=["Metrics"]) 
 
 

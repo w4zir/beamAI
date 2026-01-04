@@ -10,7 +10,7 @@ This middleware:
 """
 import time
 from typing import Callable
-from fastapi import Request, Response
+from fastapi import Request, Response, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
@@ -24,6 +24,7 @@ from .logging import (
     generate_request_id,
     get_logger,
 )
+from .metrics import record_http_request
 
 logger = get_logger(__name__)
 
@@ -75,6 +76,8 @@ class TraceIDMiddleware(BaseHTTPMiddleware):
         
         # Log request start
         start_time = time.time()
+        # Store start time in request state for exception handlers
+        request.state.start_time = start_time
         logger.info(
             "request_started",
             method=request.method,
@@ -91,6 +94,14 @@ class TraceIDMiddleware(BaseHTTPMiddleware):
             process_time = time.time() - start_time
             latency_ms = int(process_time * 1000)
             
+            # Record metrics
+            record_http_request(
+                method=request.method,
+                endpoint=request.url.path,
+                status_code=response.status_code,
+                duration_seconds=process_time,
+            )
+            
             # Log request completion
             logger.info(
                 "request_completed",
@@ -106,10 +117,23 @@ class TraceIDMiddleware(BaseHTTPMiddleware):
             
             return response
             
+        except HTTPException:
+            # HTTPExceptions (4xx) are handled by FastAPI exception handlers
+            # Don't record metrics here - let the exception handler do it
+            # Re-raise to let FastAPI handle it
+            raise
         except Exception as e:
             # Calculate latency even on error
             process_time = time.time() - start_time
             latency_ms = int(process_time * 1000)
+            
+            # Record metrics for error (500 status code)
+            record_http_request(
+                method=request.method,
+                endpoint=request.url.path,
+                status_code=500,
+                duration_seconds=process_time,
+            )
             
             # Log error
             logger.error(

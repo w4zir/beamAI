@@ -56,48 +56,48 @@
 ## 1.2 Metrics Collection (Prometheus)
 
 ### Setup & Configuration
-- [ ] Install `prometheus-client` Python library
-- [ ] Add prometheus-client to `requirements.txt`
-- [ ] Create metrics module (`app/core/metrics.py`)
-- [ ] Initialize Prometheus registry
+- [x] Install `prometheus-client` Python library
+- [x] Add prometheus-client to `requirements.txt`
+- [x] Create metrics module (`app/core/metrics.py`)
+- [x] Initialize Prometheus registry
 
 ### RED Metrics - Rate
-- [ ] Create counter metric for request rate per endpoint
-- [ ] Track: `http_requests_total{method, endpoint, status}`
-- [ ] Increment counter on each request
-- [ ] Calculate requests/second from counter
+- [x] Create counter metric for request rate per endpoint
+- [x] Track: `http_requests_total{method, endpoint, status}`
+- [x] Increment counter on each request
+- [x] Calculate requests/second from counter
 
 ### RED Metrics - Errors
-- [ ] Create counter metric for error rate per endpoint
-- [ ] Track: `http_errors_total{method, endpoint, status_code}`
-- [ ] Track 4xx errors separately from 5xx errors
-- [ ] Calculate error rate percentage
+- [x] Create counter metric for error rate per endpoint
+- [x] Track: `http_errors_total{method, endpoint, status_code}`
+- [x] Track 4xx errors separately from 5xx errors
+- [x] Calculate error rate percentage
 
 ### RED Metrics - Duration
-- [ ] Create histogram metric for request latency
-- [ ] Track: `http_request_duration_seconds{method, endpoint}`
-- [ ] Calculate percentiles: p50, p95, p99, p999
-- [ ] Track latency for each endpoint separately
+- [x] Create histogram metric for request latency
+- [x] Track: `http_request_duration_seconds{method, endpoint}`
+- [x] Calculate percentiles: p50, p95, p99, p999
+- [x] Track latency for each endpoint separately
 
 ### Business Metrics
-- [ ] Create counter for zero-result searches: `search_zero_results_total{query}`
-- [ ] Create counter for cache hits: `cache_hits_total{cache_type}`
-- [ ] Create counter for cache misses: `cache_misses_total{cache_type}`
-- [ ] Create histogram for ranking scores: `ranking_score_distribution{product_id}`
-- [ ] Calculate zero-result rate percentage
-- [ ] Calculate cache hit rate percentage
+- [x] Create counter for zero-result searches: `search_zero_results_total{query}`
+- [x] Create counter for cache hits: `cache_hits_total{cache_type}`
+- [x] Create counter for cache misses: `cache_misses_total{cache_type}`
+- [x] Create histogram for ranking scores: `ranking_score_distribution{product_id}`
+- [x] Calculate zero-result rate percentage
+- [x] Calculate cache hit rate percentage
 
 ### Resource Metrics
-- [ ] Create gauge for CPU usage: `system_cpu_usage_percent`
-- [ ] Create gauge for memory usage: `system_memory_usage_bytes`
-- [ ] Create gauge for database connection pool: `db_connection_pool_size{state}`
-- [ ] Track active vs idle connections
+- [x] Create gauge for CPU usage: `system_cpu_usage_percent`
+- [x] Create gauge for memory usage: `system_memory_usage_bytes`
+- [x] Create gauge for database connection pool: `db_connection_pool_size{state}`
+- [x] Track active vs idle connections
 
 ### Metrics Endpoint
-- [ ] Create `/metrics` endpoint in FastAPI
-- [ ] Expose Prometheus format metrics
-- [ ] Ensure endpoint is accessible (no auth required for Prometheus scraping)
-- [ ] Test metrics endpoint returns valid Prometheus format
+- [x] Create `/metrics` endpoint in FastAPI
+- [x] Expose Prometheus format metrics
+- [x] Ensure endpoint is accessible (no auth required for Prometheus scraping)
+- [x] Test metrics endpoint returns valid Prometheus format
 
 ### Grafana Dashboards
 - [ ] Set up Grafana instance (or configure access)
@@ -127,10 +127,10 @@
   - [ ] Cache operation latency
 
 ### Testing
-- [ ] Write unit tests for metrics collection
-- [ ] Verify metrics are correctly incremented
-- [ ] Test metrics endpoint returns expected format
-- [ ] Verify Grafana dashboards display data correctly
+- [x] Write unit tests for metrics collection
+- [x] Verify metrics are correctly incremented
+- [x] Test metrics endpoint returns expected format
+- [ ] Verify Grafana dashboards display data correctly (requires Grafana setup)
 
 ---
 
