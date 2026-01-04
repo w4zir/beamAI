@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from app.core.logging import get_logger, set_user_id
 from app.core.metrics import (
     record_search_zero_result,
+    record_cache_hit,
+    record_cache_miss,
     record_ranking_score,
 )
 from app.services.search.keyword import search_keywords
@@ -48,6 +50,9 @@ async def search(
     start_time = time.time()
     query = q.strip() if q else ""
     # TODO: Implement caching in Phase 2 - cache hits/misses will be recorded when implemented
+    
+    # Record cache miss (since caching not implemented yet)
+    record_cache_miss("search")
     
     # Set user_id in context if provided
     if user_id:
