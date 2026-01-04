@@ -8,74 +8,76 @@
 
 ## 3.1 Semantic Search (FAISS)
 
+**Status**: ✅ Core implementation complete. Remaining items: automated index rebuild pipeline, hot-reloading, memory monitoring, health check endpoint, query embedding caching, comprehensive testing, and Prometheus metrics.
+
 ### Setup & Configuration
-- [ ] Install FAISS library (`faiss-cpu` or `faiss-gpu`)
-- [ ] Install SentenceTransformers library
-- [ ] Add FAISS and SentenceTransformers to `requirements.txt`
-- [ ] Create semantic search service module (`app/services/search/semantic.py`)
-- [ ] Configure embedding model (`all-MiniLM-L6-v2` or `all-mpnet-base-v2`)
-- [ ] Determine embedding dimensions (384 or 768)
+- [x] Install FAISS library (`faiss-cpu` or `faiss-gpu`)
+- [x] Install SentenceTransformers library
+- [x] Add FAISS and SentenceTransformers to `requirements.txt`
+- [x] Create semantic search service module (`app/services/search/semantic.py`)
+- [x] Configure embedding model (`all-MiniLM-L6-v2` or `all-mpnet-base-v2`)
+- [x] Determine embedding dimensions (384 or 768)
 
 ### Embedding Generation
-- [ ] Create embedding generation script/function
-- [ ] Load SentenceTransformers model
-- [ ] Generate embeddings for product descriptions
-- [ ] Batch process embeddings for all products
-- [ ] Store embeddings in temporary storage (for index building)
-- [ ] Handle missing or empty product descriptions
-- [ ] Add embedding generation to batch job pipeline
+- [x] Create embedding generation script/function
+- [x] Load SentenceTransformers model
+- [x] Generate embeddings for product descriptions
+- [x] Batch process embeddings for all products
+- [x] Store embeddings in temporary storage (for index building)
+- [x] Handle missing or empty product descriptions
+- [x] Add embedding generation to batch job pipeline
 
 ### Index Building
-- [ ] Create FAISS index builder script (`scripts/build_faiss_index.py`)
-- [ ] Choose index type (`IndexIVFFlat` or `IndexHNSW`)
-- [ ] Configure index parameters (nlist, nprobe for IVFFlat; M, ef_construction for HNSW)
-- [ ] Build FAISS index from product embeddings
-- [ ] Save index to disk (with versioning)
-- [ ] Create index metadata file (product_id mapping, index version, build date)
-- [ ] Add index validation (verify all products are indexed)
+- [x] Create FAISS index builder script (`scripts/build_faiss_index.py`)
+- [x] Choose index type (`IndexIVFFlat` or `IndexHNSW`)
+- [x] Configure index parameters (nlist, nprobe for IVFFlat; M, ef_construction for HNSW)
+- [x] Build FAISS index from product embeddings
+- [x] Save index to disk (with versioning)
+- [x] Create index metadata file (product_id mapping, index version, build date)
+- [x] Add index validation (verify all products are indexed)
 - [ ] Create index rebuild pipeline (weekly batch job)
 
 ### Index Loading & Management
-- [ ] Create index loader service
-- [ ] Load FAISS index in memory on application startup
-- [ ] Implement index version checking
-- [ ] Handle index loading failures gracefully
+- [x] Create index loader service
+- [x] Load FAISS index in memory on application startup
+- [x] Implement index version checking
+- [x] Handle index loading failures gracefully
 - [ ] Support hot-reloading of index (without restart)
 - [ ] Monitor index memory usage
 - [ ] Add index health check endpoint
 
 ### Query Processing
-- [ ] Create query embedding function
-- [ ] Generate query embedding on-the-fly for search requests
-- [ ] Implement FAISS index search (top-K candidates)
-- [ ] Calculate cosine similarity scores
-- [ ] Return `search_semantic_score` for each result
-- [ ] Handle empty query or invalid input
+- [x] Create query embedding function
+- [x] Generate query embedding on-the-fly for search requests
+- [x] Implement FAISS index search (top-K candidates)
+- [x] Calculate cosine similarity scores
+- [x] Return `search_semantic_score` for each result
+- [x] Handle empty query or invalid input
 - [ ] Add query embedding caching (optional, for repeated queries)
 
 ### Hybrid Search Integration
-- [ ] Create hybrid search service
-- [ ] Combine keyword and semantic search results
-- [ ] Implement result merging logic
-- [ ] Use `max(keyword_score, semantic_score)` per RANKING_LOGIC.md
-- [ ] Handle cases where one search type fails
-- [ ] Add hybrid search metrics (keyword vs semantic result counts)
+- [x] Create hybrid search service
+- [x] Combine keyword and semantic search results
+- [x] Implement result merging logic
+- [x] Use `max(keyword_score, semantic_score)` per RANKING_LOGIC.md
+- [x] Handle cases where one search type fails
+- [x] Add hybrid search metrics (keyword vs semantic result counts)
 - [ ] Test hybrid search with various query types
 
 ### Fallback Mechanisms
-- [ ] Implement fallback to keyword-only if FAISS index fails
-- [ ] Implement fallback if embedding generation fails
+- [x] Implement fallback to keyword-only if FAISS index fails
+- [x] Implement fallback if embedding generation fails
 - [ ] Add circuit breaker for semantic search service
-- [ ] Log fallback events for monitoring
-- [ ] Ensure graceful degradation
+- [x] Log fallback events for monitoring
+- [x] Ensure graceful degradation
 
 ### Integration with Search Endpoint
-- [ ] Integrate semantic search into search endpoint
-- [ ] Add semantic search as optional parameter
-- [ ] Update search response to include semantic scores
-- [ ] Maintain backward compatibility (keyword-only still works)
-- [ ] Add feature flag for semantic search (enable/disable)
-- [ ] Update API documentation
+- [x] Integrate semantic search into search endpoint
+- [x] Add semantic search as optional parameter
+- [x] Update search response to include semantic scores
+- [x] Maintain backward compatibility (keyword-only still works)
+- [x] Add feature flag for semantic search (enable/disable)
+- [x] Update API documentation
 
 ### Testing
 - [ ] Write unit tests for embedding generation
@@ -90,14 +92,14 @@
 - [ ] Verify semantic search returns relevant results for conceptual queries
 
 ### Monitoring & Metrics
-- [ ] Add metrics: semantic search request count
-- [ ] Add metrics: semantic search latency (p50, p95, p99)
-- [ ] Add metrics: embedding generation latency
-- [ ] Add metrics: FAISS index search latency
-- [ ] Add metrics: hybrid search result distribution
-- [ ] Add metrics: fallback usage count
-- [ ] Log semantic search queries and results
-- [ ] Track semantic vs keyword result overlap
+- [x] Add metrics: semantic search request count
+- [ ] Add metrics: semantic search latency (p50, p95, p99) - Basic latency logging implemented, Prometheus metrics pending
+- [x] Add metrics: embedding generation latency
+- [x] Add metrics: FAISS index search latency
+- [x] Add metrics: hybrid search result distribution
+- [x] Add metrics: fallback usage count
+- [x] Log semantic search queries and results
+- [x] Track semantic vs keyword result overlap
 
 ---
 
@@ -405,14 +407,14 @@
 
 ## Documentation
 
-- [ ] Document semantic search implementation and usage
-- [ ] Document FAISS index building and management
+- [x] Document semantic search implementation and usage
+- [x] Document FAISS index building and management
 - [ ] Document collaborative filtering model training and serving
 - [ ] Document feature store architecture and usage
 - [ ] Document query enhancement features
-- [ ] Update FEATURE_DEFINITIONS.md with new features
+- [x] Update FEATURE_DEFINITIONS.md with new features (product_embedding feature documented)
 - [ ] Update RANKING_LOGIC.md if ranking changes
-- [ ] Update API documentation with new endpoints/parameters
+- [x] Update API documentation with new endpoints/parameters
 - [ ] Create developer guide for adding new ML features
 - [ ] Document model deployment process
 
@@ -420,11 +422,11 @@
 
 ## Integration & Testing
 
-- [ ] Integration test: End-to-end semantic search flow
-  - [ ] Verify embedding generation
-  - [ ] Verify FAISS index search
-  - [ ] Verify hybrid search merging
-  - [ ] Verify results are returned correctly
+- [x] Integration test: End-to-end semantic search flow
+  - [x] Verify embedding generation
+  - [x] Verify FAISS index search
+  - [x] Verify hybrid search merging
+  - [x] Verify results are returned correctly
 - [ ] Integration test: End-to-end collaborative filtering flow
   - [ ] Verify model training
   - [ ] Verify model loading
