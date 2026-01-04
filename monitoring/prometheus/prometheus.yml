@@ -16,7 +16,7 @@ scrape_configs:
     scrape_timeout: 10s
     metrics_path: '/metrics'
     static_configs:
-      - targets: ['backend:8000']
+      - targets: ['host.docker.internal:8000']
         labels:
           service: 'beamai-backend'
           component: 'api'
