@@ -111,6 +111,10 @@ class SemanticSearchService:
                 index_path=str(self.index_path),
                 message="Semantic search will be disabled. Run build_faiss_index.py to create index.",
             )
+            # Reset metrics to indicate index is unavailable
+            semantic_index_available.set(0)
+            semantic_index_memory_bytes.set(0)
+            semantic_index_total_products.set(0)
             return False
         
         if not self.metadata_path.exists():
@@ -119,6 +123,10 @@ class SemanticSearchService:
                 metadata_path=str(self.metadata_path),
                 message="Index metadata not found. Index may be corrupted.",
             )
+            # Reset metrics to indicate index is unavailable
+            semantic_index_available.set(0)
+            semantic_index_memory_bytes.set(0)
+            semantic_index_total_products.set(0)
             return False
         
         try:
@@ -152,6 +160,10 @@ class SemanticSearchService:
                 )
                 self.index = None
                 self.metadata = None
+                # Reset metrics to indicate index is unavailable
+                semantic_index_available.set(0)
+                semantic_index_memory_bytes.set(0)
+                semantic_index_total_products.set(0)
                 return False
             
             load_time_ms = int((time.time() - start_time) * 1000)

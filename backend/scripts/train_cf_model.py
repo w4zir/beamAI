@@ -141,11 +141,15 @@ def save_model_artifacts(
         logger.info("cf_saving_model_artifacts")
         
         # Save factor matrices
-        # Note: implicit stores item factors and user factors
-        # item_factors is what we need for products
-        # user_factors is what we need for users
-        user_factors = model.user_factors
-        item_factors = model.item_factors
+        # Note: We fit on matrix.T (transpose), so implicit treats:
+        # - Rows of matrix.T (products) as users -> model.user_factors
+        # - Columns of matrix.T (users) as items -> model.item_factors
+        # But semantically we want:
+        # - user_factors for users (columns of matrix.T) -> model.item_factors
+        # - item_factors for products (rows of matrix.T) -> model.user_factors
+        # So we need to swap them when saving
+        user_factors = model.item_factors  # columns of matrix.T = users
+        item_factors = model.user_factors   # rows of matrix.T = products
         
         np.save(user_factors_path, user_factors)
         np.save(item_factors_path, item_factors)
@@ -225,27 +229,35 @@ def validate_model(
     
     Args:
         model: Trained ALS model
-        matrix: Interaction matrix
+        matrix: Interaction matrix (user-product matrix)
         
     Returns:
         True if model is valid, False otherwise
     """
     try:
-        # Check that factors match
-        if model.user_factors.shape[0] != matrix.shape[0]:
+        # Note: model.fit() was called with matrix.T (transpose)
+        # implicit treats rows as users and columns as items
+        # So after transpose: matrix.T has shape (num_products, num_users)
+        # - model.user_factors corresponds to rows of matrix.T (products)
+        # - model.item_factors corresponds to columns of matrix.T (users)
+        # Validation checks dimensions before we swap them during save
+        
+        # Check that user_factors match number of products (rows of transposed matrix)
+        if model.user_factors.shape[0] != matrix.shape[1]:
             logger.error(
                 "cf_model_validation_failed",
                 reason="user_factors_dimension_mismatch",
-                expected=matrix.shape[0],
+                expected=matrix.shape[1],
                 actual=model.user_factors.shape[0],
             )
             return False
         
-        if model.item_factors.shape[0] != matrix.shape[1]:
+        # Check that item_factors match number of users (columns of transposed matrix)
+        if model.item_factors.shape[0] != matrix.shape[0]:
             logger.error(
                 "cf_model_validation_failed",
                 reason="item_factors_dimension_mismatch",
-                expected=matrix.shape[1],
+                expected=matrix.shape[0],
                 actual=model.item_factors.shape[0],
             )
             return False
@@ -280,6 +292,9 @@ def main(
     iterations: int = DEFAULT_ITERATIONS,
     alpha: float = DEFAULT_ALPHA,
     min_interactions: int = 1,
+    min_matrix_users: int = 10,
+    min_matrix_products: int = 10,
+    min_matrix_interactions: int = 100,
 ):
     """
     Main function to train CF model.
@@ -291,6 +306,9 @@ def main(
         iterations: Number of ALS iterations
         alpha: Confidence scaling for implicit feedback
         min_interactions: Minimum interactions per user-product pair
+        min_matrix_users: Minimum number of users required for matrix validation
+        min_matrix_products: Minimum number of products required for matrix validation
+        min_matrix_interactions: Minimum number of interactions required for matrix validation
     """
     logger.info("cf_training_pipeline_started")
     
@@ -312,7 +330,12 @@ def main(
     matrix, user_id_to_index, product_id_to_index = build_interaction_matrix(interactions)
     
     # Validate matrix
-    if not validate_interaction_matrix(matrix):
+    if not validate_interaction_matrix(
+        matrix,
+        min_users=min_matrix_users,
+        min_products=min_matrix_products,
+        min_interactions=min_matrix_interactions,
+    ):
         logger.error("cf_training_matrix_validation_failed")
         sys.exit(1)
     
@@ -395,6 +418,24 @@ if __name__ == "__main__":
         default=1,
         help="Minimum interactions per user-product pair (default: 1)",
     )
+    parser.add_argument(
+        "--min-matrix-users",
+        type=int,
+        default=10,
+        help="Minimum number of users required for matrix validation (default: 10)",
+    )
+    parser.add_argument(
+        "--min-matrix-products",
+        type=int,
+        default=10,
+        help="Minimum number of products required for matrix validation (default: 10)",
+    )
+    parser.add_argument(
+        "--min-matrix-interactions",
+        type=int,
+        default=100,
+        help="Minimum number of interactions required for matrix validation (default: 100)",
+    )
     
     args = parser.parse_args()
     
@@ -407,5 +448,8 @@ if __name__ == "__main__":
         iterations=args.iterations,
         alpha=args.alpha,
         min_interactions=args.min_interactions,
+        min_matrix_users=args.min_matrix_users,
+        min_matrix_products=args.min_matrix_products,
+        min_matrix_interactions=args.min_matrix_interactions,
     )
 

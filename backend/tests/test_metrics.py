@@ -435,14 +435,16 @@ class TestMetricsEndpoint:
     
     def test_get_metrics_content_type(self):
         """Test that metrics content type is correct."""
+        from prometheus_client import CONTENT_TYPE_LATEST
         content_type = get_metrics_content_type()
         
-        assert content_type == "text/plain; version=0.0.4; charset=utf-8"
+        assert content_type == CONTENT_TYPE_LATEST
     
     def test_metrics_endpoint_integration(self):
         """Test metrics endpoint via FastAPI test client."""
         from fastapi.testclient import TestClient
         from app.main import app
+        from prometheus_client import CONTENT_TYPE_LATEST
         
         client = TestClient(app)
         
@@ -453,7 +455,7 @@ class TestMetricsEndpoint:
         response = client.get("/metrics")
         
         assert response.status_code == 200
-        assert response.headers["content-type"] == "text/plain; version=0.0.4; charset=utf-8"
+        assert response.headers["content-type"] == CONTENT_TYPE_LATEST
         
         # Verify metrics content
         metrics_text = response.text

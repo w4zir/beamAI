@@ -125,9 +125,10 @@ def test_semantic_health_check_with_index(client, temp_index_dir, sample_index):
 
 def test_metrics_endpoint(client):
     """Test Prometheus metrics endpoint."""
+    from prometheus_client import CONTENT_TYPE_LATEST
     response = client.get("/metrics")
     assert response.status_code == 200
-    assert response.headers["content-type"] == "text/plain; version=0.0.4; charset=utf-8"
+    assert response.headers["content-type"] == CONTENT_TYPE_LATEST
     
     # Check that metrics text contains expected metrics
     metrics_text = response.text

@@ -207,6 +207,12 @@ python scripts/train_cf_model.py \
     --iterations 20 \
     --alpha 1.5 \
     --min-interactions 1
+
+# Train with lower validation thresholds (for development/testing with limited data)
+python scripts/train_cf_model.py \
+    --min-matrix-users 5 \
+    --min-matrix-products 5 \
+    --min-matrix-interactions 50
 ```
 
 **Parameters:**
@@ -216,6 +222,9 @@ python scripts/train_cf_model.py \
 - `--iterations`: Number of ALS iterations (default: 15)
 - `--alpha`: Confidence scaling for implicit feedback (default: 1.0)
 - `--min-interactions`: Minimum interactions per user-product pair (default: 1)
+- `--min-matrix-users`: Minimum number of users required for matrix validation (default: 10)
+- `--min-matrix-products`: Minimum number of products required for matrix validation (default: 10)
+- `--min-matrix-interactions`: Minimum number of interactions required for matrix validation (default: 100)
 
 **Note:** The CF model is automatically loaded on application startup. If the model is not available, the system falls back to `cf_score = 0.0` (no errors thrown). CF scores are only computed when `user_id` is provided in recommendation requests.
 
@@ -1093,6 +1102,49 @@ cd backend
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 python -m app.main
 ```
+
+**Problem: Failed to build wheel for `implicit` package (Windows)**
+The `implicit` package requires C++ compilation on Windows. Even with Visual Studio Build Tools installed, the package's CMakeLists.txt may have compatibility issues with newer VS versions (e.g., VS 2026). Choose one of these solutions:
+
+**Solution 1: Use Conda (Recommended for Windows)**
+Conda provides pre-built binaries for `implicit`, avoiding compilation issues:
+```powershell
+# If you have Anaconda/Miniconda installed:
+# Create conda environment
+conda create -n beamai python=3.12
+
+# Install implicit and dependencies from conda-forge (pre-built binaries)
+conda install -c conda-forge implicit scipy numpy
+
+# Install remaining dependencies
+conda run -n beamai pip install -r backend\requirements.txt
+
+# To use the environment:
+conda activate beamai
+# Or run commands with: conda run -n beamai <command>
+```
+
+**Solution 2: Use Docker (Easiest)**
+Docker handles all build dependencies automatically:
+```bash
+docker-compose up backend
+```
+
+**Solution 3: Install Visual Studio Build Tools (May Still Fail)**
+Even with Visual Studio Build Tools installed, `implicit` may fail due to CMake compatibility issues:
+1. Download and install [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)
+2. During installation, select "Desktop development with C++" workload
+3. Open "Developer Command Prompt for VS 2022" (not regular PowerShell)
+4. Navigate to project and activate venv
+5. Try installation (may still fail due to CMakeLists.txt bug)
+
+**Solution 4: Skip Collaborative Filtering (Temporary)**
+If you don't need collaborative filtering immediately, you can temporarily skip `implicit`:
+1. Comment out `implicit>=0.5.0` in `requirements.txt`
+2. Install other dependencies
+3. The system will work but CF features will be unavailable (falls back gracefully)
+
+**Note**: The `implicit` package is only required for collaborative filtering (Phase 3.2). The system will continue to work without it, but CF recommendations will be disabled.
 
 **Problem: Supabase connection fails**
 - Check `.env` file has correct `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
