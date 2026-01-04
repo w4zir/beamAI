@@ -7,11 +7,13 @@ This document provides a detailed explanation of each component of the BeamAI se
 1. [System Architecture](#system-architecture)
 2. [Structured Logging](#structured-logging)
 3. [Search Service](#search-service)
-4. [Recommendation Service](#recommendation-service)
-5. [Ranking Service](#ranking-service)
-6. [Feature Computation](#feature-computation)
-7. [Event Tracking](#event-tracking)
-8. [Request Flow](#request-flow)
+4. [Semantic Search (Phase 3.1)](#semantic-search-phase-31)
+5. [Hybrid Search](#hybrid-search)
+6. [Recommendation Service](#recommendation-service)
+7. [Ranking Service](#ranking-service)
+8. [Feature Computation](#feature-computation)
+9. [Event Tracking](#event-tracking)
+10. [Request Flow](#request-flow)
 
 ---
 
@@ -585,28 +587,70 @@ def search_keywords(query: str, limit: int = 50) -> List[Tuple[str, float]]:
 
 ### Search Endpoint
 
-The search endpoint orchestrates the search and ranking:
+The search endpoint orchestrates hybrid or keyword search and ranking:
 
-```26:79:backend/app/routes/search.py
+```30:152:backend/app/routes/search.py
 @router.get("", response_model=List[SearchResult])
 async def search(
+    request: Request,
     q: str = Query(..., description="Search query"),
     user_id: Optional[str] = Query(None, description="Optional user ID for personalization"),
     k: int = Query(10, ge=1, le=100, description="Number of results to return")
 ):
     """
-    Search for products using keyword search with ranking.
+    Search for products using keyword or hybrid search with ranking.
     
     Returns ranked results using Phase 1 ranking formula.
+    Uses hybrid search (keyword + semantic) if ENABLE_SEMANTIC_SEARCH=true and semantic search is available.
+    Otherwise falls back to keyword search only.
     """
-    if not q or not q.strip():
+    start_time = time.time()
+    query = q.strip() if q else ""
+    cache_hit = False  # TODO: Implement caching in Phase 2
+    
+    # Set user_id in context if provided
+    if user_id:
+        set_user_id(user_id)
+    
+    if not query:
+        logger.warning(
+            "search_query_empty",
+            query=q,
+        )
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
     
     try:
-        # Get candidates from search service
-        candidates = search_keywords(q.strip(), limit=k * 2)
+        # Check feature flag for semantic search
+        enable_semantic = os.getenv("ENABLE_SEMANTIC_SEARCH", "false").lower() == "true"
+        semantic_service = get_semantic_search_service()
+        semantic_available = semantic_service and semantic_service.is_available()
+        use_hybrid = enable_semantic and semantic_available
+        
+        logger.info(
+            "search_started",
+            query=query,
+            user_id=user_id,
+            k=k,
+            enable_semantic=enable_semantic,
+            semantic_available=semantic_available,
+            use_hybrid=use_hybrid,
+        )
+        
+        # Get candidates from search service (hybrid or keyword only)
+        if use_hybrid:
+            candidates = hybrid_search(query, limit=k * 2)
+        else:
+            candidates = search_keywords(query, limit=k * 2)
         
         if not candidates:
+            latency_ms = int((time.time() - start_time) * 1000)
+            logger.info(
+                "search_zero_results",
+                query=query,
+                user_id=user_id,
+                latency_ms=latency_ms,
+                cache_hit=cache_hit,
+            )
             return []
         
         # Apply ranking
@@ -623,7 +667,12 @@ async def search(
                 for product_id, final_score, breakdown in ranked[:k]
             ]
         except Exception as ranking_error:
-            logger.warning(f"Ranking failed, falling back to popularity sort: {ranking_error}")
+            logger.warning(
+                "search_ranking_failed",
+                query=query,
+                error=str(ranking_error),
+                error_type=type(ranking_error).__name__,
+            )
             # Fallback: sort by search_score
             candidates.sort(key=lambda x: x[1], reverse=True)
             results = [
@@ -635,13 +684,370 @@ async def search(
                 for product_id, score in candidates[:k]
             ]
         
-        logger.info(f"Search query '{q}' returned {len(results)} results")
+        latency_ms = int((time.time() - start_time) * 1000)
+        logger.info(
+            "search_completed",
+            query=query,
+            user_id=user_id,
+            results_count=len(results),
+            latency_ms=latency_ms,
+            cache_hit=cache_hit,
+            use_hybrid=use_hybrid,
+        )
+        
         return results
         
+    except HTTPException:
+        # Re-raise HTTP exceptions (they're already properly formatted)
+        raise
     except Exception as e:
-        logger.error(f"Error in search endpoint: {e}", exc_info=True)
+        latency_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "search_error",
+            query=query,
+            user_id=user_id,
+            error=str(e),
+            error_type=type(e).__name__,
+            latency_ms=latency_ms,
+            exc_info=True,
+        )
         raise HTTPException(status_code=500, detail="Internal server error during search")
 ```
+
+**Search Flow:**
+1. Check if semantic search is enabled (`ENABLE_SEMANTIC_SEARCH`)
+2. Check if semantic search service is available (index loaded)
+3. If both true → Use hybrid search
+4. Otherwise → Use keyword search only
+5. Apply ranking to candidates
+6. Return top-K ranked results
+
+---
+
+## Semantic Search (Phase 3.1)
+
+The semantic search service implements **vector similarity search** using FAISS and SentenceTransformers to find products based on conceptual similarity rather than exact keyword matches.
+
+### Architecture
+
+Semantic search consists of three main components:
+
+1. **Embedding Generation**: SentenceTransformers model (`all-MiniLM-L6-v2`) generates 384-dimensional embeddings
+2. **FAISS Index**: Pre-built index of product embeddings stored on disk
+3. **Query Processing**: On-the-fly query embedding generation and FAISS search
+
+### Embedding Model
+
+The system uses SentenceTransformers `all-MiniLM-L6-v2`:
+- **Dimensions**: 384
+- **Model Type**: Distilled BERT model optimized for semantic similarity
+- **Normalization**: Embeddings are L2-normalized for cosine similarity computation
+
+### Index Building
+
+The FAISS index is built offline using a batch script:
+
+```python:backend/scripts/build_faiss_index.py
+# Key steps:
+1. Load all products from database
+2. Generate embeddings for product text (name + description + category)
+3. Build FAISS index (IndexFlatL2 for <10K products, IndexIVFFlat for >=10K)
+4. Save index and metadata to disk
+```
+
+**Index Types:**
+- **IndexFlatL2**: Exact search, used for datasets <10K products
+- **IndexIVFFlat**: Approximate search with clustering, used for datasets >=10K products
+
+### Index Loading
+
+The semantic search service loads the index on application startup:
+
+```174:193:backend/app/services/search/semantic.py
+    def initialize(self) -> bool:
+        """
+        Initialize service: load model and index.
+        
+        Returns:
+            True if both model and index loaded successfully, False otherwise
+        """
+        model_loaded = self.load_model()
+        if not model_loaded:
+            return False
+        
+        index_loaded = self.load_index()
+        if not index_loaded:
+            logger.warning(
+                "semantic_search_partially_available",
+                message="Model loaded but index not available. Semantic search disabled.",
+            )
+            return False
+        
+        return True
+```
+
+**Graceful Degradation:**
+- If index is missing, semantic search is disabled
+- System falls back to keyword-only search
+- No errors are thrown; search continues normally
+
+### Query Processing
+
+Semantic search processes queries in three steps:
+
+1. **Generate Query Embedding**: Convert query text to 384-dim vector
+2. **Search FAISS Index**: Find top-K nearest neighbors using L2 distance
+3. **Convert to Similarity Scores**: Transform L2 distances to cosine similarity (0-1 range)
+
+```252:339:backend/app/services/search/semantic.py
+    def search(self, query: str, top_k: int = 50) -> List[Tuple[str, float]]:
+        """
+        Search for products using semantic similarity.
+        
+        Args:
+            query: Search query string
+            top_k: Number of results to return
+            
+        Returns:
+            List of (product_id, search_semantic_score) tuples, sorted by score descending
+            Returns empty list if search fails or service is not available
+        """
+        if not self.is_available():
+            logger.warning(
+                "semantic_search_not_available",
+                query=query,
+                message="Semantic search service not available. Returning empty results.",
+            )
+            return []
+        
+        if not query or not query.strip():
+            logger.warning(
+                "semantic_search_empty_query",
+                message="Empty query provided for semantic search.",
+            )
+            return []
+        
+        try:
+            start_time = time.time()
+            
+            # Generate query embedding
+            query_embedding = self.generate_embedding(query)
+            if query_embedding is None:
+                logger.warning(
+                    "semantic_search_embedding_failed",
+                    query=query,
+                    message="Failed to generate query embedding. Returning empty results.",
+                )
+                return []
+            
+            # Reshape for FAISS (1 x embedding_dim)
+            query_embedding = query_embedding.reshape(1, -1).astype('float32')
+            
+            # Search FAISS index
+            search_start = time.time()
+            k = min(top_k, self.index.ntotal)  # Don't search for more than available
+            distances, indices = self.index.search(query_embedding, k)
+            search_latency_ms = int((time.time() - search_start) * 1000)
+            
+            # Convert distances to similarity scores (cosine similarity)
+            # FAISS L2 distance: smaller distance = higher similarity
+            # Convert to similarity: similarity = 1 / (1 + distance)
+            # Since we normalized embeddings, L2 distance can be converted to cosine similarity
+            # For normalized vectors: cosine_sim = 1 - (distance^2 / 2)
+            results = []
+            for i, (distance, idx) in enumerate(zip(distances[0], indices[0])):
+                if idx == -1:  # FAISS returns -1 for invalid results
+                    continue
+                
+                # Convert L2 distance to cosine similarity
+                # For normalized vectors: cosine_sim = 1 - (distance^2 / 2)
+                # Clamp to [0, 1] range
+                cosine_similarity = max(0.0, min(1.0, 1.0 - (distance ** 2) / 2.0))
+                
+                # Get product_id from mapping
+                product_id = self.product_id_mapping.get(int(idx))
+                if not product_id:
+                    logger.warning(
+                        "semantic_search_product_id_missing",
+                        index_position=int(idx),
+                        message="Product ID not found in mapping. Skipping result.",
+                    )
+                    continue
+                
+                results.append((product_id, float(cosine_similarity)))
+            
+            total_latency_ms = int((time.time() - start_time) * 1000)
+            
+            logger.info(
+                "semantic_search_completed",
+                query=query,
+                results_count=len(results),
+                top_k=top_k,
+                search_latency_ms=search_latency_ms,
+                total_latency_ms=total_latency_ms,
+            )
+            
+            return results
+            
+        except Exception as e:
+            logger.error(
+                "semantic_search_error",
+                query=query,
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
+            return []
+```
+
+**Score Conversion:**
+- FAISS returns L2 distances (smaller = more similar)
+- For normalized embeddings, L2 distance is converted to cosine similarity: `cosine_sim = 1 - (distance² / 2)`
+- Scores are clamped to [0, 1] range
+
+### Configuration
+
+Semantic search is controlled by environment variable:
+
+```bash
+ENABLE_SEMANTIC_SEARCH=true  # Enable hybrid search (requires FAISS index)
+```
+
+**Behavior:**
+- If `ENABLE_SEMANTIC_SEARCH=true` and index is available → Hybrid search
+- If `ENABLE_SEMANTIC_SEARCH=false` or index unavailable → Keyword-only search
+
+---
+
+## Hybrid Search
+
+Hybrid search combines keyword and semantic search results to leverage both exact matches and conceptual similarity.
+
+### Merging Strategy
+
+According to `RANKING_LOGIC.md`, hybrid search uses:
+
+```
+search_score = max(keyword_score, semantic_score)
+```
+
+This ensures the best match (whether exact keyword or semantic similarity) is emphasized.
+
+### Implementation
+
+```17:108:backend/app/services/search/hybrid.py
+def hybrid_search(query: str, limit: int = 50) -> List[Tuple[str, float]]:
+    """
+    Perform hybrid search combining keyword and semantic search.
+    
+    Merges results using max(keyword_score, semantic_score) per product.
+    If one search type fails, falls back to the other.
+    
+    Args:
+        query: Search query string
+        limit: Maximum number of results to return
+        
+    Returns:
+        List of (product_id, max_score) tuples, sorted by score descending
+        max_score = max(keyword_score, semantic_score) per RANKING_LOGIC.md
+    """
+    start_time = time.time()
+    
+    # Get semantic search service
+    semantic_service = get_semantic_search_service()
+    semantic_available = semantic_service and semantic_service.is_available()
+    
+    # Perform keyword search
+    keyword_start = time.time()
+    keyword_results = search_keywords(query, limit=limit * 2)  # Get more candidates for merging
+    keyword_latency_ms = int((time.time() - keyword_start) * 1000)
+    
+    # Perform semantic search if available
+    semantic_results = []
+    semantic_latency_ms = 0
+    if semantic_available:
+        try:
+            semantic_start = time.time()
+            semantic_results = semantic_service.search(query, top_k=limit * 2)
+            semantic_latency_ms = int((time.time() - semantic_start) * 1000)
+        except Exception as e:
+            logger.warning(
+                "hybrid_search_semantic_failed",
+                query=query,
+                error=str(e),
+                error_type=type(e).__name__,
+                message="Falling back to keyword search only.",
+            )
+            semantic_results = []
+    
+    # Merge results: max(keyword_score, semantic_score) per product
+    merged_scores: dict[str, float] = {}
+    
+    # Add keyword scores
+    for product_id, keyword_score in keyword_results:
+        merged_scores[product_id] = keyword_score
+    
+    # Merge semantic scores (take max)
+    for product_id, semantic_score in semantic_results:
+        if product_id in merged_scores:
+            # Use max of keyword and semantic scores
+            merged_scores[product_id] = max(merged_scores[product_id], semantic_score)
+        else:
+            # Product only in semantic results
+            merged_scores[product_id] = semantic_score
+    
+    # Convert to list and sort by score descending
+    merged_results = [
+        (product_id, score)
+        for product_id, score in merged_scores.items()
+    ]
+    merged_results.sort(key=lambda x: x[1], reverse=True)
+    
+    # Limit results
+    merged_results = merged_results[:limit]
+    
+    total_latency_ms = int((time.time() - start_time) * 1000)
+    
+    # Log metrics
+    keyword_count = len(keyword_results)
+    semantic_count = len(semantic_results)
+    merged_count = len(merged_results)
+    overlap_count = len(set(p[0] for p in keyword_results) & set(p[0] for p in semantic_results))
+    
+    logger.info(
+        "hybrid_search_completed",
+        query=query,
+        keyword_results=keyword_count,
+        semantic_results=semantic_count,
+        merged_results=merged_count,
+        overlap=overlap_count,
+        keyword_latency_ms=keyword_latency_ms,
+        semantic_latency_ms=semantic_latency_ms,
+        total_latency_ms=total_latency_ms,
+        semantic_available=semantic_available,
+    )
+    
+    return merged_results
+```
+
+**Merging Algorithm:**
+1. Perform keyword search (always)
+2. Perform semantic search (if available)
+3. For each product, take `max(keyword_score, semantic_score)`
+4. Sort by merged score descending
+5. Return top-K results
+
+**Fallback Behavior:**
+- If semantic search fails, return keyword results only
+- If keyword search fails, return semantic results only
+- If both fail, return empty list
+
+**Metrics Logged:**
+- `keyword_results`: Number of keyword search results
+- `semantic_results`: Number of semantic search results
+- `merged_results`: Number of final merged results
+- `overlap`: Number of products found by both methods
+- Latency for each search type and total
 
 ---
 
@@ -1207,17 +1613,37 @@ async def track_event(event: EventRequest):
 
 1. **User sends search query** → `GET /search?q={query}&k={limit}`
 2. **FastAPI Gateway** validates request
-3. **Search Service** normalizes query and retrieves candidates with `search_keyword_score`
-4. **Ranking Service** fetches features (popularity_score, freshness_score) and computes final scores
-5. **Results returned** with scores and breakdowns
+3. **Check semantic search availability** (if `ENABLE_SEMANTIC_SEARCH=true`)
+4. **Search Service**:
+   - If hybrid: Combines keyword and semantic search using `max(keyword_score, semantic_score)`
+   - If keyword-only: Normalizes query and retrieves candidates with `search_keyword_score`
+5. **Ranking Service** fetches features (popularity_score, freshness_score) and computes final scores
+6. **Results returned** with scores and breakdowns
 
-**Example Flow:**
+**Example Flow (Hybrid Search):**
+```
+User Query: "comfortable running shoes"
+↓
+Hybrid Search:
+  - Keyword Search: Returns [(product_id, keyword_score), ...]
+  - Semantic Search: Returns [(product_id, semantic_score), ...]
+  - Merge: max(keyword_score, semantic_score) per product
+↓
+Ranking Service: 
+  - Fetch features for products
+  - Compute: final_score = 0.4*search_score + 0.2*popularity + 0.1*freshness
+  - Sort by final_score
+↓
+Return top k results
+```
+
+**Example Flow (Keyword-Only):**
 ```
 User Query: "running shoes"
 ↓
 Normalize: "running shoes"
 ↓
-Search Service: Returns [(product_id, search_score), ...]
+Keyword Search: Returns [(product_id, search_score), ...]
 ↓
 Ranking Service: 
   - Fetch features for products
@@ -1265,10 +1691,19 @@ The BeamAI system implements a **production-grade search and recommendation plat
 
 - **Separation of concerns**: Retrieval, ranking, and serving are independent
 - **Deterministic ranking**: Phase 1 formula with explainable scores
+- **Hybrid search (Phase 3.1)**: Combines keyword and semantic search for better relevance
+- **Semantic search**: FAISS-based vector similarity search using SentenceTransformers
 - **Offline feature computation**: Popularity scores computed in batch jobs
 - **On-demand freshness**: Freshness scores computed from creation dates
-- **Graceful degradation**: Fallback mechanisms at every layer
+- **Graceful degradation**: Fallback mechanisms at every layer (semantic → keyword → popularity)
 - **Event-driven analytics**: Append-only event tracking for feature computation
 
 The system is designed to scale from local development to production environments without architectural rewrites.
+
+### Phase 3.1 Features
+
+- **Semantic Search**: Vector similarity search using FAISS and SentenceTransformers
+- **Hybrid Search**: Combines keyword and semantic results using `max(keyword_score, semantic_score)`
+- **Offline Index Building**: FAISS index built from product embeddings in batch job
+- **Graceful Fallback**: System continues with keyword-only search if semantic search unavailable
 

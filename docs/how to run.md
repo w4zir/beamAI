@@ -83,6 +83,9 @@ SUPABASE_SERVICE_KEY=your_service_role_key
 # Logging Configuration
 LOG_LEVEL=INFO                    # DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_JSON=true                     # true for JSON output (production), false for console (development)
+
+# Semantic Search Configuration (Phase 3.1)
+ENABLE_SEMANTIC_SEARCH=false      # Set to true to enable hybrid search (requires FAISS index)
 ```
 
 **Structured Logging:**
@@ -137,6 +140,35 @@ python -m app.services.features.compute
 ```
 
 This runs the feature computation batch job to calculate initial popularity scores.
+
+### 8. Build FAISS Index for Semantic Search (Optional)
+
+To enable semantic search, build the FAISS index from product embeddings:
+
+```bash
+cd backend
+python scripts/build_faiss_index.py
+```
+
+This script:
+- Loads all products from the database
+- Generates embeddings using SentenceTransformers (`all-MiniLM-L6-v2`)
+- Builds a FAISS index (IndexFlatL2 for <10K products, IndexIVFFlat for >=10K)
+- Saves the index to `backend/data/indices/faiss_index.index`
+- Saves metadata to `backend/data/indices/index_metadata.json`
+
+**Note:** The index is automatically loaded on application startup. If the index is not available, the system falls back to keyword-only search.
+
+**Enable Semantic Search:**
+
+Add to your `.env` file:
+
+```bash
+# Enable semantic search (requires FAISS index)
+ENABLE_SEMANTIC_SEARCH=true
+```
+
+If `ENABLE_SEMANTIC_SEARCH` is not set or `false`, the system uses keyword search only.
 
 ---
 
@@ -366,6 +398,48 @@ Starting feature computation batch job
 Feature computation batch job completed
 ==================================================
 ```
+
+### 8. Test Semantic Search
+
+**Build FAISS index:**
+```bash
+cd backend
+python scripts/build_faiss_index.py
+```
+
+**Expected output:**
+```
+[INFO] build_index_started
+[INFO] build_index_loading_model model_name=all-MiniLM-L6-v2
+[INFO] build_index_model_loaded
+[INFO] build_index_loading_products
+[INFO] build_index_products_loaded count=150
+[INFO] build_index_generating_embeddings product_count=150
+[INFO] build_index_embeddings_generated count=150 time_seconds=2.34
+[INFO] build_index_building_faiss_index product_count=150 embedding_dim=384
+[INFO] build_index_using_flat_index reason="Small dataset (< 10K products)"
+[INFO] build_index_faiss_index_built index_type=IndexFlatL2 total_vectors=150 build_time_seconds=0.01
+[INFO] build_index_saving_faiss_index path=backend/data/indices/faiss_index.index
+[INFO] build_index_saved total_products=150
+[INFO] build_index_completed total_products=150
+```
+
+**Enable semantic search:**
+```bash
+# Add to .env file
+ENABLE_SEMANTIC_SEARCH=true
+```
+
+**Test hybrid search:**
+```bash
+# Restart backend, then test search
+curl "http://localhost:8000/search?q=comfortable%20shoes&k=5"
+```
+
+**Verify semantic search is working:**
+- Check backend logs for `use_hybrid=true` in search logs
+- Check logs for `semantic_search_completed` events
+- Test with conceptual queries (e.g., "comfortable shoes for running") that may not match exact keywords
 
 ### 8. Test Frontend
 
@@ -628,6 +702,20 @@ python -m app.services.features.compute
 - Verify timezone handling (should be UTC)
 - Check freshness computation logic in `app/services/features/freshness.py`
 
+**Problem: Semantic search not working**
+- Verify FAISS index exists: `ls backend/data/indices/faiss_index.index`
+- Check `ENABLE_SEMANTIC_SEARCH=true` in `.env` file
+- Verify index was built successfully: Check logs from `build_faiss_index.py`
+- Check backend startup logs for semantic search initialization
+- If index is missing, run: `python scripts/build_faiss_index.py`
+- If semantic search fails to load, system falls back to keyword-only search (check logs)
+
+**Problem: FAISS index build fails**
+- Ensure products exist in database (run `seed_data.py` first)
+- Check that SentenceTransformers model downloads successfully (first run downloads model)
+- Verify sufficient disk space for index file
+- Check Python dependencies: `pip list | grep -E "(faiss|sentence-transformers)"`
+
 ### Feature Computation Issues
 
 **Problem: Popularity scores not updating**
@@ -817,6 +905,9 @@ curl -H "X-Trace-ID: test-123" "http://localhost:8000/search?q=test&k=5"
 # Feature Computation
 cd backend && python -m app.services.features.compute
 
+# Semantic Search (Phase 3.1)
+cd backend && python scripts/build_faiss_index.py
+
 # Database
 cd backend && python scripts/seed_data.py
 ```
@@ -834,10 +925,11 @@ cd backend && python scripts/seed_data.py
 
 1. **Explore the API**: Visit http://localhost:8000/docs
 2. **Test search**: Try different queries and verify results
-3. **Track events**: Simulate user interactions
-4. **Monitor features**: Recompute features and see how scores change
-5. **Test structured logging**: Verify trace IDs appear in logs and response headers
-6. **Read architecture docs**: Understand system design in `specs/`
+3. **Test semantic search**: Build FAISS index and enable hybrid search
+4. **Track events**: Simulate user interactions
+5. **Monitor features**: Recompute features and see how scores change
+6. **Test structured logging**: Verify trace IDs appear in logs and response headers
+7. **Read architecture docs**: Understand system design in `specs/`
 
 ### Observability Features
 

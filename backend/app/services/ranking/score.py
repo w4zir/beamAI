@@ -9,7 +9,9 @@ final_score = (
     0.1 * freshness_score
 )
 
-For search: search_score = search_keyword_score
+For search: search_score = max(search_keyword_score, search_semantic_score)
+  - Hybrid search already computes max(keyword_score, semantic_score) per RANKING_LOGIC.md
+  - This service receives the merged search_score from hybrid search
 For recommendations: search_score = 0
 cf_score = 0 (no collaborative filtering in Phase 1)
 """
@@ -65,7 +67,9 @@ def rank_products(
     Rank products using Phase 1 formula.
     
     Args:
-        candidates: List of (product_id, search_keyword_score) tuples
+        candidates: List of (product_id, search_score) tuples
+          - For search: search_score is max(keyword_score, semantic_score) from hybrid search
+          - For recommendations: search_score is 0
         is_search: True if this is a search query, False if recommendations
         user_id: Optional user ID (for future personalization)
         
