@@ -12,22 +12,26 @@ This document outlines the phased approach to evolve the current MVP into a prod
 - Basic frontend UI
 - Docker Compose setup
 - Basic error handling
+- **Structured Logging (Phase 1.1)**: JSON-structured logging with trace ID propagation using `structlog`
+- **Metrics Collection (Phase 1.2)**: Prometheus metrics (RED metrics, business metrics, resource metrics) with Grafana dashboards
+- **Semantic Search (Phase 3.1)**: FAISS-based vector similarity search using SentenceTransformers with hybrid search support
 
 ### ❌ Missing (Critical for Production)
-- Observability stack (metrics, logs, traces)
-- Caching layer (Redis integration)
-- Rate limiting and DDoS protection
-- Circuit breakers and resilience patterns
-- Semantic search (FAISS implementation)
-- Collaborative filtering
-- Batch job infrastructure
-- Feature store
-- A/B testing framework
+- Distributed Tracing (OpenTelemetry) - Phase 1.3
+- Alerting Rules (Prometheus Alertmanager) - Phase 1.4
+- Caching layer (Redis integration) - Phase 2.1
+- Rate limiting and DDoS protection - Phase 2.2
+- Circuit breakers and resilience patterns - Phase 2.3
+- Database optimization (read replicas, connection pooling) - Phase 2.4
+- Collaborative filtering - Phase 3.2
+- Feature store - Phase 3.3
+- Query enhancement (spell correction, synonyms) - Phase 3.4
+- Batch job infrastructure - Phase 4
+- A/B testing framework - Phase 8.1
 - CI/CD pipeline
 - Load testing infrastructure
-- Database optimization (read replicas, partitioning)
-- Security hardening
-- Performance optimization
+- Security hardening - Phase 6
+- Performance optimization - Phase 7
 
 ---
 

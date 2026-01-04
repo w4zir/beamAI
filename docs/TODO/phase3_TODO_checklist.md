@@ -4,11 +4,32 @@
 
 **Timeline**: Weeks 9-14
 
+**Status**: 
+- ✅ **3.1 Semantic Search (FAISS)**: Core implementation COMPLETE
+- ⏳ **3.2 Collaborative Filtering**: NOT IMPLEMENTED
+- ⏳ **3.3 Feature Store**: NOT IMPLEMENTED
+- ⏳ **3.4 Query Enhancement**: NOT IMPLEMENTED
+
 ---
 
 ## 3.1 Semantic Search (FAISS)
 
-**Status**: ✅ Core implementation complete. Remaining items: automated index rebuild pipeline, hot-reloading, memory monitoring, health check endpoint, query embedding caching, comprehensive testing, and Prometheus metrics.
+**Status**: ✅ **Core implementation complete**. 
+
+**Implemented**:
+- FAISS index building and loading
+- SentenceTransformers embedding generation
+- Semantic search query processing
+- Hybrid search integration (keyword + semantic)
+- Graceful fallback to keyword-only search
+- Prometheus metrics for semantic search
+- Memory usage monitoring
+- Health check endpoint integration
+
+**Remaining items** (optional enhancements):
+- Automated index rebuild pipeline (weekly batch job)
+- Hot-reloading of index (without restart)
+- Query embedding caching (for repeated queries)
 
 ### Setup & Configuration
 - [x] Install FAISS library (`faiss-cpu` or `faiss-gpu`)

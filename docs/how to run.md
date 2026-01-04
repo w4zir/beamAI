@@ -402,7 +402,9 @@ Feature computation batch job completed
 ==================================================
 ```
 
-### 8. Test Semantic Search
+### 8. Test Semantic Search (Phase 3.1)
+
+**Status**: ✅ Semantic search is implemented and available.
 
 **Build FAISS index:**
 ```bash
@@ -433,9 +435,14 @@ python scripts/build_faiss_index.py
 ENABLE_SEMANTIC_SEARCH=true
 ```
 
+**Restart backend** to load the FAISS index:
+```bash
+npm run backend
+```
+
 **Test hybrid search:**
 ```bash
-# Restart backend, then test search
+# Test hybrid search (combines keyword + semantic)
 curl "http://localhost:8000/search?q=comfortable%20shoes&k=5"
 ```
 
@@ -443,6 +450,9 @@ curl "http://localhost:8000/search?q=comfortable%20shoes&k=5"
 - Check backend logs for `use_hybrid=true` in search logs
 - Check logs for `semantic_search_completed` events
 - Test with conceptual queries (e.g., "comfortable shoes for running") that may not match exact keywords
+- The system automatically falls back to keyword-only search if semantic search is unavailable
+
+**Note**: The semantic search service loads the FAISS index on application startup. If the index is not available, the system gracefully falls back to keyword-only search without errors.
 
 ### 8. Test Frontend
 
@@ -457,7 +467,9 @@ curl "http://localhost:8000/search?q=comfortable%20shoes&k=5"
 
 ## Monitoring with Prometheus & Grafana
 
-The system includes comprehensive metrics collection using Prometheus and visualization with Grafana dashboards (Phase 1.2 implementation).
+The system includes comprehensive metrics collection using Prometheus and visualization with Grafana dashboards (Phase 1.2 implementation - ✅ **COMPLETE**).
+
+**Status**: Metrics collection and Grafana dashboards are fully implemented and operational.
 
 ### Architecture
 
@@ -1303,13 +1315,27 @@ cd backend && python scripts/seed_data.py
 
 ### Observability Features
 
-The system includes comprehensive structured logging:
+The system includes comprehensive observability features (Phase 1.1 & 1.2 - ✅ **COMPLETE**):
 
+**Structured Logging (Phase 1.1)**:
 - **Trace ID Propagation**: Every request gets a unique trace ID for correlation
 - **Structured Logs**: JSON-formatted logs with consistent fields
 - **Request Context**: trace_id, request_id, and user_id automatically included
 - **Performance Tracking**: Latency metrics in all endpoint logs
 - **Error Context**: Full error context with trace IDs for debugging
+
+**Metrics Collection (Phase 1.2)**:
+- **RED Metrics**: Rate, Errors, Duration for all endpoints
+- **Business Metrics**: Zero-result searches, cache hits/misses, ranking scores
+- **Resource Metrics**: CPU, memory, database connection pool usage
+- **Semantic Search Metrics**: Semantic search specific metrics (Phase 3.1)
+
+**Grafana Dashboards**:
+- Service Health Overview
+- Search Performance
+- Recommendation Performance
+- Database Health
+- Cache Performance
 
 **Verify observability:**
 ```bash
@@ -1319,7 +1345,14 @@ curl -v "http://localhost:8000/search?q=test&k=5" 2>&1 | grep -i trace
 # View structured logs (if LOG_JSON=true)
 # Logs will be JSON format, one per line
 # Use jq to parse: cat logs.txt | jq '.trace_id'
+
+# Check metrics endpoint
+curl http://localhost:8000/metrics
+
+# View metrics in Grafana (http://localhost:3000)
 ```
+
+**Note**: Distributed Tracing (OpenTelemetry) is planned for Phase 1.3 but not yet implemented.
 
 For more details, see the main [README.md](../README.md) file.
 
