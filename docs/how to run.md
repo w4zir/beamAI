@@ -8,7 +8,8 @@ This document provides step-by-step instructions for running and testing the Bea
 2. [Initial Setup](#initial-setup)
 3. [Running the System](#running-the-system)
 4. [Testing the System](#testing-the-system)
-5. [Troubleshooting](#troubleshooting)
+5. [Monitoring with Prometheus & Grafana](#monitoring-with-prometheus--grafana)
+6. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -205,7 +206,9 @@ Frontend runs on: http://localhost:5173
 docker-compose up
 ```
 
-This starts all services (PostgreSQL, Redis, Backend, Frontend) in containers.
+This starts all services (PostgreSQL, Redis, Backend, Frontend, Prometheus, Grafana) in containers.
+
+**Note:** Prometheus and Grafana are included in the Docker Compose setup for monitoring. See [Monitoring with Prometheus & Grafana](#monitoring-with-prometheus--grafana) section for details.
 
 ---
 
@@ -449,6 +452,342 @@ curl "http://localhost:8000/search?q=comfortable%20shoes&k=5"
 4. Verify results are displayed with scores
 5. Navigate to the Recommendations page
 6. Verify recommendations are displayed
+
+---
+
+## Monitoring with Prometheus & Grafana
+
+The system includes comprehensive metrics collection using Prometheus and visualization with Grafana dashboards (Phase 1.2 implementation).
+
+### Architecture
+
+```
+Backend API (FastAPI)
+    ↓ (exposes /metrics endpoint)
+Prometheus (scrapes metrics every 15s)
+    ↓ (data source)
+Grafana (visualizes metrics in dashboards)
+```
+
+### Starting the Monitoring Stack
+
+**Option 1: With Docker Compose (Recommended)**
+
+The monitoring stack is included in `docker-compose.yml`. Start Prometheus and Grafana:
+
+```bash
+# Start only monitoring services
+docker-compose up -d prometheus grafana
+
+# Or start everything including backend
+docker-compose up -d
+```
+
+**Option 2: Standalone (Backend Running Locally)**
+
+If running the backend locally (not in Docker), update `monitoring/prometheus/prometheus.yml` to scrape `host.docker.internal:8000` instead of `backend:8000`, then start Prometheus and Grafana:
+
+```bash
+docker-compose up -d prometheus grafana
+```
+
+### Accessing Prometheus
+
+- **URL**: http://localhost:9090
+- **Metrics Endpoint**: http://localhost:8000/metrics (exposed by backend)
+- **Targets**: http://localhost:9090/targets (verify backend is being scraped)
+
+**Query Metrics in Prometheus:**
+
+Use PromQL queries to explore metrics:
+
+```promql
+# Request rate per endpoint
+rate(http_requests_total[5m])
+
+# Error rate
+rate(http_errors_total[5m])
+
+# p95 latency
+histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+
+# CPU usage
+system_cpu_usage_percent
+
+# Memory usage
+system_memory_usage_bytes / 1024 / 1024  # MB
+
+# Cache hit rate
+rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m]))
+```
+
+### Accessing Grafana
+
+- **URL**: http://localhost:3000
+- **Default Credentials**:
+  - Username: `admin`
+  - Password: `admin`
+- **Change Password**: You'll be prompted to change the password on first login
+
+**View Dashboards:**
+
+1. Login to Grafana at http://localhost:3000
+2. Click "Dashboards" → "Browse" in the left menu
+3. Five dashboards are automatically provisioned:
+   - **Service Health Overview**: Overall system health, request rates, errors, latency
+   - **Search Performance**: Search-specific metrics (rate, latency, zero-results, cache hits)
+   - **Recommendation Performance**: Recommendation-specific metrics
+   - **Database Health**: Connection pool usage and database metrics
+   - **Cache Performance**: Cache hit/miss rates by type
+
+### Available Metrics
+
+The system exposes comprehensive metrics following Prometheus conventions:
+
+#### RED Metrics (Rate, Errors, Duration)
+
+- **`http_requests_total{method, endpoint, status}`**: Total HTTP requests
+  - Labels: `method` (GET, POST), `endpoint` (normalized path), `status` (200, 404, 500, etc.)
+  - Example: `http_requests_total{method="GET", endpoint="/search", status="200"}`
+
+- **`http_errors_total{method, endpoint, status_code}`**: Total HTTP errors (4xx and 5xx)
+  - Labels: `method`, `endpoint`, `status_code`
+  - Separate counters for client errors (4xx) and server errors (5xx)
+
+- **`http_request_duration_seconds{method, endpoint}`**: Request latency histogram
+  - Buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0] seconds
+  - Calculate percentiles: p50, p95, p99, p999
+
+#### Business Metrics
+
+- **`search_zero_results_total{query_pattern}`**: Zero-result searches
+  - Tracks searches that return no results
+  - Label: `query_pattern` (normalized query pattern for grouping)
+
+- **`cache_hits_total{cache_type}`**: Cache hits
+  - Labels: `cache_type` (e.g., "search", "recommendation", "features")
+
+- **`cache_misses_total{cache_type}`**: Cache misses
+  - Labels: `cache_type`
+
+- **`ranking_score_distribution{product_id}`**: Ranking score distribution
+  - Histogram of ranking scores (0.0 to 1.0)
+  - Useful for analyzing score distributions
+
+#### Resource Metrics
+
+- **`system_cpu_usage_percent`**: CPU usage percentage (gauge)
+  - Updated on each metrics scrape
+
+- **`system_memory_usage_bytes`**: Memory usage in bytes (gauge)
+  - Updated on each metrics scrape
+
+- **`db_connection_pool_size{state}`**: Database connection pool metrics
+  - Labels: `state` ("active", "idle", "total")
+  - Tracks connection pool utilization
+
+### Testing Metrics Collection
+
+**1. Verify Metrics Endpoint:**
+
+```bash
+# Check metrics endpoint is accessible
+curl http://localhost:8000/metrics
+
+# Should return Prometheus-formatted metrics
+```
+
+**2. Generate Test Metrics:**
+
+Make some API calls to generate metrics:
+
+```bash
+# Search requests
+curl "http://localhost:8000/search?q=running+shoes&k=5"
+curl "http://localhost:8000/search?q=laptop&k=10"
+
+# Recommendation requests
+curl "http://localhost:8000/recommend/user123?k=10"
+
+# Health check
+curl "http://localhost:8000/health/"
+
+# Generate errors (for testing error metrics)
+curl "http://localhost:8000/search?q="  # Invalid query
+```
+
+Wait 15-30 seconds for Prometheus to scrape metrics, then check Grafana dashboards.
+
+**3. Run Automated Tests:**
+
+```bash
+# Test Prometheus and Grafana setup
+cd backend
+python scripts/test_grafana_dashboards.py
+```
+
+This script verifies:
+- Backend metrics endpoint is accessible
+- Prometheus can scrape metrics
+- Grafana can connect to Prometheus
+- All dashboards are loaded
+- Dashboard queries return data
+
+**Expected output:**
+```
+✓ Backend metrics endpoint accessible (8 metrics found)
+✓ Prometheus is accessible and responding to queries
+✓ Prometheus has 1 healthy backend target(s)
+✓ Grafana has Prometheus datasource configured
+✓ All 5 expected dashboards found
+✓ All dashboard queries successful
+```
+
+### Viewing Metrics in Grafana
+
+**Service Health Overview Dashboard:**
+
+- Request rate per endpoint (requests/second)
+- Error rate per endpoint (errors/second)
+- Latency percentiles (p50, p95, p99) per endpoint
+- CPU and memory usage over time
+
+**Search Performance Dashboard:**
+
+- Search request rate
+- Search latency (p50, p95, p99)
+- Search error rate (4xx, 5xx)
+- Zero-result rate percentage
+- Cache hit rate for searches
+
+**Recommendation Performance Dashboard:**
+
+- Recommendation request rate
+- Recommendation latency (p50, p95, p99)
+- Recommendation error rate
+- Cache hit rate for recommendations
+
+**Database Health Dashboard:**
+
+- Connection pool usage (active, idle, total)
+- Connection pool utilization percentage
+- Available connections (alerts if < 2)
+
+**Cache Performance Dashboard:**
+
+- Cache hit rate by type (search, recommendation, features)
+- Cache hit/miss rates over time
+- Total cache operations
+
+### Prometheus Configuration
+
+Configuration file: `monitoring/prometheus/prometheus.yml`
+
+**Key Settings:**
+- Scrape interval: 15 seconds
+- Scrape timeout: 10 seconds
+- Retention: 30 days
+- Target: `backend:8000/metrics` (or `host.docker.internal:8000` for local backend)
+
+**Reload Configuration:**
+
+```bash
+# Reload Prometheus config without restart
+curl -X POST http://localhost:9090/-/reload
+
+# Or restart Prometheus
+docker-compose restart prometheus
+```
+
+### Grafana Configuration
+
+**Automatic Provisioning:**
+
+- **Data Sources**: `monitoring/grafana/provisioning/datasources/prometheus.yml`
+  - Automatically configures Prometheus as data source
+  - URL: `http://prometheus:9090`
+
+- **Dashboards**: `monitoring/grafana/provisioning/dashboards/dashboards.yml`
+  - Automatically loads dashboards from `monitoring/grafana/dashboards/`
+  - Dashboards are read-only by default (can be edited in UI)
+
+**Customizing Dashboards:**
+
+1. Open Grafana UI
+2. Edit dashboard panels
+3. Export dashboard JSON
+4. Save to `monitoring/grafana/dashboards/` for persistence
+
+### Troubleshooting Monitoring
+
+**Prometheus not scraping metrics:**
+
+1. Check Prometheus targets: http://localhost:9090/targets
+   - Should show `beamai-backend` target as "UP"
+2. Verify backend metrics endpoint: `curl http://localhost:8000/metrics`
+3. Check Prometheus logs: `docker logs beamai-prometheus`
+4. Verify network connectivity: Ensure Prometheus can reach backend
+
+**Grafana dashboards show "No data":**
+
+1. Verify Prometheus datasource:
+   - Grafana → Configuration → Data Sources
+   - Test connection to Prometheus
+2. Check time range: Try "Last 1 hour" or "Last 5 minutes"
+3. Verify metrics are being generated:
+   - Make API calls to generate metrics
+   - Wait 15-30 seconds for Prometheus to scrape
+   - Check Prometheus UI for metrics
+4. Check dashboard queries:
+   - Open dashboard panel → Edit
+   - Verify PromQL query is correct
+   - Test query in Prometheus UI first
+
+**Dashboards not appearing:**
+
+1. Check Grafana logs: `docker logs beamai-grafana`
+2. Verify dashboard files exist: `ls monitoring/grafana/dashboards/`
+3. Check provisioning config: `cat monitoring/grafana/provisioning/dashboards/dashboards.yml`
+4. Restart Grafana: `docker-compose restart grafana`
+
+**Metrics endpoint returns empty:**
+
+1. Verify backend is running: `curl http://localhost:8000/health/`
+2. Check metrics module is imported: Verify `app/core/metrics.py` exists
+3. Make some API calls to generate metrics
+4. Check backend logs for errors
+
+### Production Considerations
+
+For production deployments:
+
+1. **Change Grafana Credentials**: Update `GF_SECURITY_ADMIN_PASSWORD` in `docker-compose.yml`
+2. **Secure Prometheus**: Add authentication if exposing Prometheus publicly
+3. **Configure Alerting**: Set up Prometheus Alertmanager for alerts (see Phase 1.4)
+4. **Persistent Storage**: Prometheus data is stored in Docker volume (30-day retention)
+5. **Resource Limits**: Set resource limits for Prometheus and Grafana containers
+6. **Backup Dashboards**: Export and backup dashboard JSON files
+
+### Metrics Best Practices
+
+1. **Monitor Key Metrics**:
+   - Request rate and latency (p95, p99)
+   - Error rate (should be < 0.1%)
+   - Cache hit rate (target: > 70%)
+   - Zero-result rate (target: < 5%)
+
+2. **Set Up Alerts** (Future):
+   - p99 latency > 500ms for 5 minutes
+   - Error rate > 1% for 2 minutes
+   - Zero-result rate > 10% for 10 minutes
+   - Database connection pool exhaustion
+
+3. **Regular Review**:
+   - Review dashboards weekly
+   - Analyze trends and anomalies
+   - Optimize based on metrics
+
+For more details, see `monitoring/README.md` and `monitoring/QUICK_START.md`.
 
 ---
 
@@ -763,6 +1102,34 @@ python -m app.services.features.compute
 - Check that `set_user_id()` is called in route handlers when user_id is available
 - Verify middleware extracts user_id from query params or headers
 
+### Monitoring Issues
+
+**Problem: Prometheus not scraping metrics**
+- Check Prometheus targets: http://localhost:9090/targets
+- Verify backend metrics endpoint: `curl http://localhost:8000/metrics`
+- Check Prometheus logs: `docker logs beamai-prometheus`
+- Verify network connectivity between Prometheus and backend containers
+- If running backend locally, update `prometheus.yml` to use `host.docker.internal:8000`
+
+**Problem: Grafana dashboards show "No data"**
+- Verify Prometheus datasource is configured: Grafana → Configuration → Data Sources
+- Test Prometheus connection in Grafana
+- Check time range in dashboard (try "Last 1 hour")
+- Make API calls to generate metrics, wait 15-30 seconds for Prometheus to scrape
+- Verify metrics exist in Prometheus UI: http://localhost:9090
+
+**Problem: Metrics endpoint returns empty**
+- Verify backend is running: `curl http://localhost:8000/health/`
+- Check that metrics module is imported in `app/main.py`
+- Make some API calls to generate metrics
+- Check backend logs for errors related to metrics collection
+
+**Problem: Dashboards not appearing in Grafana**
+- Check Grafana logs: `docker logs beamai-grafana`
+- Verify dashboard files exist: `ls monitoring/grafana/dashboards/`
+- Check provisioning configuration: `monitoring/grafana/provisioning/dashboards/dashboards.yml`
+- Restart Grafana: `docker-compose restart grafana`
+
 ---
 
 ## Development Workflow
@@ -918,6 +1285,9 @@ cd backend && python scripts/seed_data.py
 - Backend API: http://localhost:8000
 - API Docs: http://localhost:8000/docs
 - Health Check: http://localhost:8000/health/
+- Metrics Endpoint: http://localhost:8000/metrics
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000 (admin/admin)
 
 ---
 
