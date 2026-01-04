@@ -9,6 +9,6 @@ Rules:
 - Do not mix training and serving code
 - Retrieval and ranking must remain separate
 - If something is unclear, leave a TODO comment instead of guessing
-
+- Update how to run.md file after every feature implementation
 
 Acknowledge once you understand.
