@@ -43,8 +43,8 @@
 - [x] Implement index version checking
 - [x] Handle index loading failures gracefully
 - [ ] Support hot-reloading of index (without restart)
-- [ ] Monitor index memory usage
-- [ ] Add index health check endpoint
+- [x] Monitor index memory usage
+- [x] Add index health check endpoint
 
 ### Query Processing
 - [x] Create query embedding function
@@ -80,20 +80,24 @@
 - [x] Update API documentation
 
 ### Testing
-- [ ] Write unit tests for embedding generation
-- [ ] Write unit tests for index building
-- [ ] Write unit tests for query processing
-- [ ] Write unit tests for hybrid search merging
-- [ ] Write integration tests for semantic search endpoint
-- [ ] Test with various query types (conceptual, specific, misspelled)
-- [ ] Test fallback mechanisms
-- [ ] Performance test: embedding generation latency
-- [ ] Performance test: FAISS search latency
-- [ ] Verify semantic search returns relevant results for conceptual queries
+- [x] Write unit tests for embedding generation
+- [x] Write unit tests for index building
+- [x] Write unit tests for query processing
+- [x] Write unit tests for hybrid search merging
+- [x] Write integration tests for semantic search endpoint
+- [x] Test with various query types (conceptual, specific, misspelled)
+- [x] Test fallback mechanisms
+- [x] Performance test: embedding generation latency
+- [x] Performance test: FAISS search latency
+- [x] Verify semantic search returns relevant results for conceptual queries
+- [x] Write unit tests for metrics collection
+- [x] Write unit tests for memory usage calculation
+- [x] Write integration tests for health check endpoint
+- [x] Write integration tests for metrics endpoint
 
 ### Monitoring & Metrics
 - [x] Add metrics: semantic search request count
-- [ ] Add metrics: semantic search latency (p50, p95, p99) - Basic latency logging implemented, Prometheus metrics pending
+- [x] Add metrics: semantic search latency (p50, p95, p99) - Prometheus histogram implemented
 - [x] Add metrics: embedding generation latency
 - [x] Add metrics: FAISS index search latency
 - [x] Add metrics: hybrid search result distribution

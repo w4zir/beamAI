@@ -17,6 +17,15 @@ import faiss
 from sentence_transformers import SentenceTransformer
 from app.core.logging import get_logger
 from app.core.database import get_supabase_client
+from app.core.metrics import (
+    semantic_search_requests_total,
+    semantic_search_latency_seconds,
+    semantic_embedding_generation_latency_seconds,
+    semantic_faiss_search_latency_seconds,
+    semantic_index_memory_bytes,
+    semantic_index_total_products,
+    semantic_index_available,
+)
 
 logger = get_logger(__name__)
 
@@ -148,12 +157,23 @@ class SemanticSearchService:
             load_time_ms = int((time.time() - start_time) * 1000)
             total_products = self.metadata.get("total_products", 0)
             
+            # Calculate index memory usage
+            # FAISS index memory = size of vectors (ntotal * d * sizeof(float32))
+            # Plus overhead for index structure
+            index_memory_bytes = self._calculate_index_memory()
+            
+            # Update Prometheus metrics
+            semantic_index_total_products.set(total_products)
+            semantic_index_memory_bytes.set(index_memory_bytes)
+            semantic_index_available.set(1)
+            
             logger.info(
                 "semantic_index_loaded",
                 index_path=str(self.index_path),
                 total_products=total_products,
                 index_type=self.metadata.get("index_type", "unknown"),
                 load_time_ms=load_time_ms,
+                index_memory_bytes=index_memory_bytes,
             )
             
             self._is_available = True
@@ -169,6 +189,10 @@ class SemanticSearchService:
             )
             self.index = None
             self.metadata = None
+            # Update metrics to indicate index is unavailable
+            semantic_index_available.set(0)
+            semantic_index_memory_bytes.set(0)
+            semantic_index_total_products.set(0)
             return False
     
     def initialize(self) -> bool:
@@ -199,7 +223,45 @@ class SemanticSearchService:
         Returns:
             True if both model and index are loaded, False otherwise
         """
-        return self._is_available and self.model is not None and self.index is not None
+        available = self._is_available and self.model is not None and self.index is not None
+        # Update metric
+        semantic_index_available.set(1 if available else 0)
+        return available
+    
+    def _calculate_index_memory(self) -> int:
+        """
+        Calculate approximate memory usage of FAISS index in bytes.
+        
+        Returns:
+            Memory usage in bytes
+        """
+        if not self.index:
+            return 0
+        
+        # Base memory: vectors stored in index
+        # For IndexFlatL2: ntotal * d * sizeof(float32)
+        # For IndexIVFFlat: similar but may have quantization overhead
+        # For IndexHNSW: vectors + graph structure overhead
+        
+        vector_memory = self.index.ntotal * self.index.d * 4  # float32 = 4 bytes
+        
+        # Add overhead for index structure
+        # This is approximate - different index types have different overheads
+        # IndexFlatL2: minimal overhead
+        # IndexIVFFlat: overhead for centroids and inverted lists
+        # IndexHNSW: overhead for graph structure (M * ntotal * 4 bytes per link)
+        
+        overhead = 0
+        if hasattr(self.index, 'nlist'):  # IVFFlat
+            # Rough estimate: centroids + inverted lists
+            overhead = self.index.nlist * self.index.d * 4  # centroids
+            overhead += self.index.ntotal * 8  # inverted list pointers (rough estimate)
+        elif hasattr(self.index, 'hnsw'):  # HNSW
+            # Rough estimate: graph structure
+            M = getattr(self.index.hnsw, 'M', 16)  # default M
+            overhead = self.index.ntotal * M * 4  # links in graph
+        
+        return int(vector_memory + overhead)
     
     def generate_embedding(self, text: str) -> Optional[np.ndarray]:
         """
@@ -229,7 +291,11 @@ class SemanticSearchService:
             start_time = time.time()
             # Generate embedding (returns numpy array)
             embedding = self.model.encode(text, convert_to_numpy=True, normalize_embeddings=True)
-            latency_ms = int((time.time() - start_time) * 1000)
+            latency_seconds = time.time() - start_time
+            latency_ms = int(latency_seconds * 1000)
+            
+            # Track Prometheus metric
+            semantic_embedding_generation_latency_seconds.observe(latency_seconds)
             
             logger.debug(
                 "semantic_embedding_generated",
@@ -279,6 +345,9 @@ class SemanticSearchService:
         try:
             start_time = time.time()
             
+            # Track request count
+            semantic_search_requests_total.inc()
+            
             # Generate query embedding
             query_embedding = self.generate_embedding(query)
             if query_embedding is None:
@@ -296,7 +365,11 @@ class SemanticSearchService:
             search_start = time.time()
             k = min(top_k, self.index.ntotal)  # Don't search for more than available
             distances, indices = self.index.search(query_embedding, k)
-            search_latency_ms = int((time.time() - search_start) * 1000)
+            faiss_search_latency_seconds = time.time() - search_start
+            search_latency_ms = int(faiss_search_latency_seconds * 1000)
+            
+            # Track FAISS search latency
+            semantic_faiss_search_latency_seconds.observe(faiss_search_latency_seconds)
             
             # Convert distances to similarity scores (cosine similarity)
             # FAISS L2 distance: smaller distance = higher similarity
@@ -325,7 +398,11 @@ class SemanticSearchService:
                 
                 results.append((product_id, float(cosine_similarity)))
             
-            total_latency_ms = int((time.time() - start_time) * 1000)
+            total_latency_seconds = time.time() - start_time
+            total_latency_ms = int(total_latency_seconds * 1000)
+            
+            # Track total semantic search latency
+            semantic_search_latency_seconds.observe(total_latency_seconds)
             
             logger.info(
                 "semantic_search_completed",
