@@ -1,18 +1,19 @@
+import os
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import logging
-import time
 
+from .core.logging import configure_logging, get_logger, get_trace_id
+from .core.middleware import TraceIDMiddleware
 from .routes import health, search, recommend, events
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure structured logging
+# Use JSON output in production (containerized), console output in development
+log_level = os.getenv("LOG_LEVEL", "INFO")
+json_output = os.getenv("LOG_JSON", "true").lower() == "true"
+configure_logging(log_level=log_level, json_output=json_output)
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 app = FastAPI(
     title="BeamAI Search & Recommendation API",
@@ -29,43 +30,50 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# Request logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Log all requests with timing."""
-    start_time = time.time()
-    
-    # Log request
-    logger.info(f"{request.method} {request.url.path} - {request.client.host if request.client else 'unknown'}")
-    
-    response = await call_next(request)
-    
-    # Log response time
-    process_time = time.time() - start_time
-    logger.info(f"{request.method} {request.url.path} - {response.status_code} - {process_time:.3f}s")
-    
-    return response
+# Add trace ID middleware (must be after CORS middleware)
+app.add_middleware(TraceIDMiddleware)
 
 
 # Error handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """Handle HTTP exceptions."""
-    return JSONResponse(
+    trace_id = get_trace_id()
+    logger.warning(
+        "http_exception",
+        status_code=exc.status_code,
+        detail=exc.detail,
+        path=request.url.path,
+        method=request.method,
+    )
+    response = JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail, "status_code": exc.status_code}
     )
+    if trace_id:
+        response.headers["X-Trace-ID"] = trace_id
+    return response
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle general exceptions."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
+    trace_id = get_trace_id()
+    logger.error(
+        "unhandled_exception",
+        error=str(exc),
+        error_type=type(exc).__name__,
+        path=request.url.path,
+        method=request.method,
+        exc_info=True,
+    )
+    response = JSONResponse(
         status_code=500,
         content={"detail": "Internal server error", "status_code": 500}
     )
+    if trace_id:
+        response.headers["X-Trace-ID"] = trace_id
+    return response
 
 
 # Include routers

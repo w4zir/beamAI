@@ -5,13 +5,13 @@ Fetches features needed for ranking:
 - popularity_score from products table
 - freshness_score computed on-demand
 """
-import logging
 from typing import Dict, List, Optional
 from datetime import datetime
+from app.core.logging import get_logger
 from app.core.database import get_supabase_client
 from app.services.features.freshness import compute_freshness_score_from_string
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def get_product_features(product_ids: List[str]) -> Dict[str, Dict[str, float]]:
@@ -27,7 +27,7 @@ def get_product_features(product_ids: List[str]) -> Dict[str, Dict[str, float]]:
     """
     client = get_supabase_client()
     if not client:
-        logger.error("Failed to get Supabase client")
+        logger.error("feature_retrieval_db_connection_failed", product_ids_count=len(product_ids))
         return {}
     
     try:
@@ -37,6 +37,10 @@ def get_product_features(product_ids: List[str]) -> Dict[str, Dict[str, float]]:
         ).in_("id", product_ids).execute()
         
         if not response.data:
+            logger.warning(
+                "feature_retrieval_no_data",
+                product_ids_count=len(product_ids),
+            )
             return {}
         
         features = {}
@@ -56,11 +60,21 @@ def get_product_features(product_ids: List[str]) -> Dict[str, Dict[str, float]]:
                 "freshness_score": freshness_score
             }
         
-        logger.debug(f"Retrieved features for {len(features)} products")
+        logger.debug(
+            "features_retrieved",
+            requested_count=len(product_ids),
+            retrieved_count=len(features),
+        )
         return features
         
     except Exception as e:
-        logger.error(f"Error retrieving product features: {e}", exc_info=True)
+        logger.error(
+            "feature_retrieval_error",
+            product_ids_count=len(product_ids),
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
+        )
         return {}
 
 

@@ -2,9 +2,10 @@
 Health check endpoint.
 """
 from fastapi import APIRouter
-import logging
 
-logger = logging.getLogger(__name__)
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 router = APIRouter()
 
 

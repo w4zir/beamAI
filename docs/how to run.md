@@ -79,7 +79,18 @@ Create a `.env` file in the project root:
 # Supabase Configuration (external standalone container)
 SUPABASE_URL=http://localhost:54321
 SUPABASE_SERVICE_KEY=your_service_role_key
+
+# Logging Configuration
+LOG_LEVEL=INFO                    # DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_JSON=true                     # true for JSON output (production), false for console (development)
 ```
+
+**Structured Logging:**
+- The system uses `structlog` for structured JSON logging
+- All logs include: `timestamp`, `level`, `service`, `trace_id`, `request_id`, `user_id` (when available)
+- Logs output to stdout (for containerized environments)
+- Set `LOG_JSON=false` for development (human-readable console output)
+- Set `LOG_JSON=true` for production (JSON format for log aggregation)
 
 Create a `frontend/.env` file:
 
@@ -256,6 +267,8 @@ This runs all unit and integration tests.
 **Run specific test file:**
 ```bash
 pytest tests/test_search.py -v
+pytest tests/test_logging.py -v
+pytest tests/test_trace_propagation.py -v
 ```
 
 **Run with coverage:**
@@ -263,7 +276,78 @@ pytest tests/test_search.py -v
 pytest tests/ --cov=app --cov-report=html
 ```
 
-### 6. Test Feature Computation
+### 6. Test Structured Logging
+
+The system uses structured JSON logging with trace ID propagation. Test logging functionality:
+
+**Test logging configuration:**
+```bash
+cd backend
+pytest tests/test_logging.py -v
+```
+
+**Test trace ID propagation:**
+```bash
+cd backend
+pytest tests/test_trace_propagation.py -v
+```
+
+**Verify trace ID in API responses:**
+```bash
+# Make a request and check response headers
+curl -v "http://localhost:8000/search?q=test&k=5"
+
+# Look for X-Trace-ID and X-Request-ID headers in response
+```
+
+**Test with custom trace ID:**
+```bash
+# Pass trace ID in header
+curl -H "X-Trace-ID: my-custom-trace-123" \
+  "http://localhost:8000/search?q=test&k=5"
+
+# Response will include the same trace ID
+```
+
+**View structured logs:**
+- When `LOG_JSON=true` (default in production), logs are output as JSON
+- When `LOG_JSON=false` (development), logs are formatted for console readability
+- All logs include: `timestamp`, `level`, `service`, `trace_id`, `request_id`, `user_id` (when available)
+
+**Example log entry (JSON format):**
+```json
+{
+  "timestamp": "2026-01-02T10:30:45.123456Z",
+  "level": "INFO",
+  "service": "beamai_search_api",
+  "trace_id": "abc123-def456-ghi789",
+  "request_id": "req-123-456",
+  "event": "search_completed",
+  "query": "running shoes",
+  "results_count": 42,
+  "latency_ms": 87,
+  "cache_hit": false
+}
+```
+
+**Log Events:**
+The system logs the following events:
+- `request_started` - When a request is received
+- `request_completed` - When a request finishes successfully
+- `request_failed` - When a request fails with an error
+- `search_started` - Search query initiated
+- `search_completed` - Search query finished
+- `search_zero_results` - Search returned no results
+- `search_error` - Search encountered an error
+- `recommendation_started` - Recommendation request started
+- `recommendation_completed` - Recommendation request finished
+- `recommendation_zero_results` - Recommendation returned no results
+- `recommendation_error` - Recommendation encountered an error
+- `ranking_started` - Ranking process started
+- `ranking_completed` - Ranking process finished
+- `ranking_product_scored` - Individual product scoring (DEBUG level)
+
+### 7. Test Feature Computation
 
 Compute popularity scores:
 
@@ -283,7 +367,7 @@ Feature computation batch job completed
 ==================================================
 ```
 
-### 7. Test Frontend
+### 8. Test Frontend
 
 1. Open http://localhost:5173 in your browser
 2. Navigate to the Search page
@@ -412,6 +496,41 @@ ab -n 1000 -c 10 "http://localhost:8000/recommend/user_123?k=10"
 **Backend logs:**
 - Check console output for request/response logs
 - Logs include timing information for each request
+- All logs are structured JSON (when `LOG_JSON=true`) with trace IDs
+- Search logs include: `query`, `results_count`, `latency_ms`, `cache_hit`
+- Recommendation logs include: `user_id`, `results_count`, `latency_ms`, `cache_hit`
+- Ranking logs include: `product_id`, `final_score`, `score_breakdown`
+
+**View logs in JSON format:**
+```bash
+# Set LOG_JSON=true in .env, then restart backend
+# Logs will be output as JSON, one per line
+# Example: grep for trace ID
+tail -f backend.log | grep "trace_id"
+```
+
+**Trace ID correlation:**
+- Every request gets a unique `trace_id` (UUID v4)
+- Trace ID is extracted from `X-Trace-ID` or `X-Request-ID` headers if present, otherwise generated
+- Trace ID is included in response headers (`X-Trace-ID`)
+- Every request also gets a unique `request_id` (UUID v4) in `X-Request-ID` header
+- All log entries for a request include the same `trace_id` and `request_id`
+- Use trace ID to correlate logs across services and debug issues
+
+**Example: Find all logs for a specific request:**
+```bash
+# If logs are in a file
+grep "abc123-def456-ghi789" backend.log
+
+# Or use jq to filter JSON logs
+cat backend.log | jq 'select(.trace_id == "abc123-def456-ghi789")'
+```
+
+**Trace ID Propagation:**
+- Trace IDs are propagated via HTTP headers (`X-Trace-ID` or `X-Request-ID`)
+- Middleware automatically extracts or generates trace IDs for every request
+- Trace IDs are stored in context variables and automatically included in all log entries
+- User IDs are extracted from query parameters (`user_id`) or headers (`X-User-ID`) and included in logs when available
 
 **Database logs:**
 - Check Supabase logs for query performance
@@ -525,6 +644,37 @@ python -m app.services.features.compute
 - Verify events table exists and has data
 - Check logs for specific error messages
 
+### Logging Issues
+
+**Problem: Logs not in JSON format**
+- Check `LOG_JSON` environment variable is set to `true`
+- Restart backend after changing environment variables
+- Verify structlog is installed: `pip list | grep structlog`
+- Check that `configure_logging()` is called with `json_output=True` in `app/main.py`
+
+**Problem: Trace ID not appearing in logs**
+- Verify trace ID middleware (`TraceIDMiddleware`) is enabled in `app/main.py`
+- Check response headers include `X-Trace-ID` and `X-Request-ID`
+- Ensure logging is configured before making requests
+- Verify middleware is added after CORS middleware but before routes
+
+**Problem: Logs missing context fields**
+- Verify structured logging is configured in `app/core/logging.py`
+- Check that context variables (`trace_id_var`, `request_id_var`, `user_id_var`) are set correctly
+- Ensure `configure_logging()` is called at application startup in `app/main.py`
+- Verify `add_trace_context` processor is included in the processor chain
+
+**Problem: Cannot find logs by trace ID**
+- Verify logs are being written to stdout (for containerized environments)
+- Check log aggregation tool configuration
+- Ensure JSON format is enabled for log parsing (`LOG_JSON=true`)
+- Test trace ID extraction: `curl -H "X-Trace-ID: test-123" http://localhost:8000/health/`
+
+**Problem: User ID not appearing in logs**
+- User ID is only included when provided via query parameter (`?user_id=...`) or header (`X-User-ID`)
+- Check that `set_user_id()` is called in route handlers when user_id is available
+- Verify middleware extracts user_id from query params or headers
+
 ---
 
 ## Development Workflow
@@ -553,9 +703,35 @@ curl "http://localhost:8000/search?q=test&k=5"
 ### 4. Check Logs
 
 Monitor console output for:
-- Request/response logs
-- Error messages
-- Performance metrics
+- Request/response logs with trace IDs
+- Error messages with full context
+- Performance metrics (latency_ms)
+- Structured JSON logs (when `LOG_JSON=true`)
+
+**View logs with trace ID:**
+```bash
+# Filter logs by trace ID
+tail -f backend.log | grep "trace_id"
+
+# Or use jq for JSON logs
+tail -f backend.log | jq 'select(.trace_id == "your-trace-id")'
+```
+
+**Common log events:**
+- `request_started` - Request received (includes method, path, query_params, client_host)
+- `request_completed` - Request finished successfully (includes status_code, latency_ms)
+- `request_failed` - Request failed with error (includes error, error_type, latency_ms)
+- `search_started` - Search query initiated (includes query, user_id, k)
+- `search_completed` - Search query finished (includes query, user_id, results_count, latency_ms, cache_hit)
+- `search_zero_results` - Search returned no results (includes query, user_id, latency_ms, cache_hit)
+- `search_error` - Search encountered an error (includes query, user_id, error, error_type, latency_ms)
+- `recommendation_started` - Recommendation request started (includes user_id, k)
+- `recommendation_completed` - Recommendation request finished (includes user_id, results_count, latency_ms, cache_hit)
+- `recommendation_zero_results` - Recommendation returned no results (includes user_id, latency_ms, cache_hit)
+- `recommendation_error` - Recommendation encountered an error (includes user_id, error, error_type, latency_ms)
+- `ranking_started` - Ranking process started (includes is_search, user_id, candidates_count, weights)
+- `ranking_completed` - Ranking process finished (includes is_search, user_id, ranked_count, candidates_count)
+- `ranking_product_scored` - Individual product scoring (DEBUG level, includes product_id, final_score, score_breakdown)
 
 ---
 
@@ -574,6 +750,8 @@ Monitor console output for:
    - `SUPABASE_SERVICE_KEY`
    - `DATABASE_URL` (if using direct Postgres connection)
    - `REDIS_URL` (if using Redis)
+   - `LOG_LEVEL` (default: INFO)
+   - `LOG_JSON` (default: true for production)
 
 3. **Run container:**
    ```bash
@@ -611,6 +789,7 @@ Monitor console output for:
 - **Feature Definitions**: See `specs/FEATURE_DEFINITIONS.md`
 - **Ranking Logic**: See `specs/RANKING_LOGIC.md`
 - **Testing Strategy**: See `specs/TESTING_STRATEGY.md`
+- **Observability**: See `specs/OBSERVABILITY.md`
 
 ---
 
@@ -630,7 +809,10 @@ npm run frontend          # Frontend only
 
 # Testing
 cd backend && pytest tests/
+cd backend && pytest tests/test_logging.py -v
+cd backend && pytest tests/test_trace_propagation.py -v
 curl "http://localhost:8000/search?q=test&k=5"
+curl -H "X-Trace-ID: test-123" "http://localhost:8000/search?q=test&k=5"
 
 # Feature Computation
 cd backend && python -m app.services.features.compute
@@ -654,7 +836,28 @@ cd backend && python scripts/seed_data.py
 2. **Test search**: Try different queries and verify results
 3. **Track events**: Simulate user interactions
 4. **Monitor features**: Recompute features and see how scores change
-5. **Read architecture docs**: Understand system design in `specs/`
+5. **Test structured logging**: Verify trace IDs appear in logs and response headers
+6. **Read architecture docs**: Understand system design in `specs/`
+
+### Observability Features
+
+The system includes comprehensive structured logging:
+
+- **Trace ID Propagation**: Every request gets a unique trace ID for correlation
+- **Structured Logs**: JSON-formatted logs with consistent fields
+- **Request Context**: trace_id, request_id, and user_id automatically included
+- **Performance Tracking**: Latency metrics in all endpoint logs
+- **Error Context**: Full error context with trace IDs for debugging
+
+**Verify observability:**
+```bash
+# Check trace ID in response headers
+curl -v "http://localhost:8000/search?q=test&k=5" 2>&1 | grep -i trace
+
+# View structured logs (if LOG_JSON=true)
+# Logs will be JSON format, one per line
+# Use jq to parse: cat logs.txt | jq '.trace_id'
+```
 
 For more details, see the main [README.md](../README.md) file.
 

@@ -6,12 +6,13 @@ According to SEARCH_DESIGN.md:
 - Uses Postgres FTS with GIN index on search_vector
 - Returns candidates with search_keyword_score
 """
-import logging
 import re
 from typing import List, Tuple
+import httpx
+from app.core.logging import get_logger
 from app.core.database import get_supabase_client
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def normalize_query(query: str) -> str:
@@ -65,14 +66,14 @@ def search_keywords(query: str, limit: int = 50) -> List[Tuple[str, float]]:
     """
     client = get_supabase_client()
     if not client:
-        logger.error("Failed to get Supabase client")
+        logger.error("keyword_search_db_connection_failed")
         return []
     
     # Normalize query
     normalized_query = normalize_query(query)
     
     if not normalized_query:
-        logger.warning("Empty query after normalization")
+        logger.warning("keyword_search_query_empty_after_normalization", original_query=query)
         return []
     
     try:
@@ -148,11 +149,57 @@ def search_keywords(query: str, limit: int = 50) -> List[Tuple[str, float]]:
         # Limit results
         results = results[:limit]
         
-        logger.info(f"Keyword search for '{query}' returned {len(results)} results")
+        logger.info(
+            "keyword_search_completed",
+            query=query,
+            normalized_query=normalized_query,
+            results_count=len(results),
+        )
         return results
         
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        # Connection errors - Supabase is likely not running
+        error_msg = str(e)
+        is_connection_refused = "refused" in error_msg.lower() or "actively refused" in error_msg.lower()
+        
+        logger.error(
+            "keyword_search_connection_error",
+            query=query,
+            error=error_msg,
+            error_type=type(e).__name__,
+            is_connection_refused=is_connection_refused,
+            message="Supabase connection failed. Ensure Supabase is running at the configured URL.",
+            suggestion="Check if Supabase is running: docker ps | grep supabase or supabase status" if is_connection_refused else "Check your SUPABASE_URL and network connectivity",
+        )
+        return []
     except Exception as e:
-        logger.error(f"Error in keyword search: {e}", exc_info=True)
+        # Check if it's a connection-related error even if not httpx exception
+        error_msg = str(e)
+        error_type_name = type(e).__name__
+        is_connection_error = (
+            "ConnectError" in error_type_name or
+            "ConnectionError" in error_type_name or
+            "refused" in error_msg.lower() or
+            "actively refused" in error_msg.lower()
+        )
+        
+        if is_connection_error:
+            logger.error(
+                "keyword_search_connection_error",
+                query=query,
+                error=error_msg,
+                error_type=error_type_name,
+                message="Database connection failed. Ensure Supabase is running.",
+                suggestion="Check if Supabase is running: docker ps | grep supabase or supabase status",
+            )
+        else:
+            logger.error(
+                "keyword_search_error",
+                query=query,
+                error=error_msg,
+                error_type=error_type_name,
+                exc_info=True,
+            )
         return []
 
 

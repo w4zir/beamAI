@@ -5,12 +5,13 @@ This document provides a detailed explanation of each component of the BeamAI se
 ## Table of Contents
 
 1. [System Architecture](#system-architecture)
-2. [Search Service](#search-service)
-3. [Recommendation Service](#recommendation-service)
-4. [Ranking Service](#ranking-service)
-5. [Feature Computation](#feature-computation)
-6. [Event Tracking](#event-tracking)
-7. [Request Flow](#request-flow)
+2. [Structured Logging](#structured-logging)
+3. [Search Service](#search-service)
+4. [Recommendation Service](#recommendation-service)
+5. [Ranking Service](#ranking-service)
+6. [Feature Computation](#feature-computation)
+7. [Event Tracking](#event-tracking)
+8. [Request Flow](#request-flow)
 
 ---
 
@@ -30,6 +31,393 @@ The system follows a **separation of concerns** architecture where retrieval, ra
 1. **Retrieval is separate from ranking**: Search/recommendation services return candidates, ranking service orders them
 2. **Offline training, online serving**: Features are computed offline, models are trained separately
 3. **Fail gracefully**: Every component has fallback mechanisms
+
+---
+
+## Structured Logging
+
+The system uses **structured JSON logging** with trace ID propagation for observability and debugging.
+
+### Logging Configuration
+
+Logging is configured using `structlog` and supports both JSON (production) and console (development) formats:
+
+```67:118:backend/app/core/logging.py
+def configure_logging(
+    log_level: str = "INFO",
+    service_name: Optional[str] = None,
+    json_output: bool = True
+) -> None:
+    """
+    Configure structured logging for the application.
+    
+    Args:
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        service_name: Service name identifier (defaults to SERVICE_NAME)
+        json_output: If True, output JSON format (for production). If False, use console format (for dev)
+    """
+    global SERVICE_NAME
+    if service_name:
+        SERVICE_NAME = service_name
+    
+    # Configure processors
+    processors: list[Processor] = [
+        structlog.contextvars.merge_contextvars,  # Merge context variables
+        structlog.stdlib.add_log_level,  # Add log level
+        structlog.stdlib.add_logger_name,  # Add logger name
+        add_trace_context,  # Add trace context (trace_id, request_id, user_id, service)
+        structlog.processors.TimeStamper(fmt="iso"),  # ISO 8601 timestamp
+        structlog.processors.StackInfoRenderer(),  # Stack traces
+        structlog.processors.format_exc_info,  # Exception formatting
+    ]
+    
+    if json_output:
+        # JSON output for production (containerized environments)
+        processors.append(structlog.processors.JSONRenderer())
+    else:
+        # Pretty console output for development
+        processors.append(structlog.dev.ConsoleRenderer())
+    
+    # Configure structlog
+    structlog.configure(
+        processors=processors,
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+    
+    # Configure standard library logging
+    import logging
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=getattr(logging, log_level.upper()),
+    )
+```
+
+### Core Logging Fields
+
+Every log entry includes:
+- **timestamp**: ISO 8601 format (UTC)
+- **level**: DEBUG, INFO, WARNING, ERROR, CRITICAL
+- **service**: Service name identifier (`beamai_search_api`)
+- **trace_id**: Correlation ID for request tracing (UUID v4)
+- **request_id**: Unique ID per request (UUID v4)
+- **user_id**: User identifier (when available)
+
+### Trace ID Propagation
+
+Trace IDs are propagated through HTTP headers and context variables:
+
+```39:133:backend/app/core/middleware.py
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """
+        Process request and add trace ID context.
+        
+        Args:
+            request: FastAPI request object
+            call_next: Next middleware/handler in chain
+            
+        Returns:
+            Response with trace ID in headers
+        """
+        # Extract trace ID from headers (check both X-Trace-ID and X-Request-ID)
+        trace_id = (
+            request.headers.get("X-Trace-ID") or 
+            request.headers.get("X-Request-ID")
+        )
+        
+        # Generate new trace ID if not present
+        if not trace_id:
+            trace_id = generate_trace_id()
+        
+        # Generate unique request ID for this request
+        request_id = generate_request_id()
+        
+        # Extract user ID from query params or headers (if available)
+        # This is optional and may not be present for all requests
+        user_id = (
+            request.query_params.get("user_id") or
+            request.headers.get("X-User-ID")
+        )
+        
+        # Set context variables for this request
+        set_trace_id(trace_id)
+        set_request_id(request_id)
+        if user_id:
+            set_user_id(user_id)
+        
+        # Log request start
+        start_time = time.time()
+        logger.info(
+            "request_started",
+            method=request.method,
+            path=request.url.path,
+            query_params=dict(request.query_params),
+            client_host=request.client.host if request.client else None,
+        )
+        
+        # Process request
+        try:
+            response = await call_next(request)
+            
+            # Calculate latency
+            process_time = time.time() - start_time
+            latency_ms = int(process_time * 1000)
+            
+            # Log request completion
+            logger.info(
+                "request_completed",
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+                latency_ms=latency_ms,
+            )
+            
+            # Add trace ID to response headers
+            response.headers["X-Trace-ID"] = trace_id
+            response.headers["X-Request-ID"] = request_id
+            
+            return response
+            
+        except Exception as e:
+            # Calculate latency even on error
+            process_time = time.time() - start_time
+            latency_ms = int(process_time * 1000)
+            
+            # Log error
+            logger.error(
+                "request_failed",
+                method=request.method,
+                path=request.url.path,
+                error=str(e),
+                error_type=type(e).__name__,
+                latency_ms=latency_ms,
+                exc_info=True,
+            )
+            
+            # Re-raise exception (let FastAPI error handlers deal with it)
+            raise
+        finally:
+            # Clear context variables after request completes
+            # (ContextVar automatically handles this per async task, but explicit is better)
+            set_trace_id(None)
+            set_request_id(None)
+            set_user_id(None)
+```
+
+**Trace ID Flow:**
+1. Extract from `X-Trace-ID` or `X-Request-ID` headers (if present)
+2. Generate new UUID v4 if not present
+3. Store in context variable (`trace_id_var`)
+4. Automatically included in all log entries via `add_trace_context` processor
+5. Returned in response headers (`X-Trace-ID`)
+
+### Search Endpoint Logging
+
+Search endpoints log structured events with relevant context:
+
+```55:115:backend/app/routes/search.py
+        logger.info(
+            "search_started",
+            query=query,
+            user_id=user_id,
+            k=k,
+        )
+        
+        # Get candidates from search service
+        candidates = search_keywords(query, limit=k * 2)
+        
+        if not candidates:
+            latency_ms = int((time.time() - start_time) * 1000)
+            logger.info(
+                "search_zero_results",
+                query=query,
+                user_id=user_id,
+                latency_ms=latency_ms,
+                cache_hit=cache_hit,
+            )
+            return []
+        
+        # Apply ranking
+        try:
+            ranked = rank_products(candidates, is_search=True, user_id=user_id)
+            
+            # Format results
+            results = [
+                SearchResult(
+                    product_id=product_id,
+                    score=final_score,
+                    reason=f"Ranked score: {final_score:.3f} (search: {breakdown['search_score']:.3f}, popularity: {breakdown['popularity_score']:.3f}, freshness: {breakdown['freshness_score']:.3f})"
+                )
+                for product_id, final_score, breakdown in ranked[:k]
+            ]
+        except Exception as ranking_error:
+            logger.warning(
+                "search_ranking_failed",
+                query=query,
+                error=str(ranking_error),
+                error_type=type(ranking_error).__name__,
+            )
+            # Fallback: sort by search_score
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            results = [
+                SearchResult(
+                    product_id=product_id,
+                    score=score,
+                    reason=f"Keyword match score: {score:.3f} (ranking unavailable)"
+                )
+                for product_id, score in candidates[:k]
+            ]
+        
+        latency_ms = int((time.time() - start_time) * 1000)
+        logger.info(
+            "search_completed",
+            query=query,
+            user_id=user_id,
+            results_count=len(results),
+            latency_ms=latency_ms,
+            cache_hit=cache_hit,
+        )
+```
+
+**Search Log Events:**
+- `search_started`: Query initiated (includes `query`, `user_id`, `k`)
+- `search_completed`: Query finished (includes `query`, `user_id`, `results_count`, `latency_ms`, `cache_hit`)
+- `search_zero_results`: No results found (includes `query`, `user_id`, `latency_ms`, `cache_hit`)
+- `search_error`: Error occurred (includes `query`, `user_id`, `error`, `error_type`, `latency_ms`)
+
+### Ranking Service Logging
+
+Ranking service logs scoring operations:
+
+```85:179:backend/app/services/ranking/score.py
+    logger.info(
+        "ranking_started",
+        is_search=is_search,
+        user_id=user_id,
+        candidates_count=len(candidates),
+        weights=WEIGHTS,
+    )
+    
+    # Extract product IDs and search scores
+    product_ids = [product_id for product_id, _ in candidates]
+    search_scores = {product_id: score for product_id, score in candidates}
+    
+    # Get product features
+    features = get_product_features(product_ids)
+    
+    if not features:
+        logger.warning(
+            "ranking_no_features",
+            is_search=is_search,
+            user_id=user_id,
+            candidates_count=len(candidates),
+        )
+        # Fallback: return candidates sorted by search_score
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        return [
+            (product_id, score, {"search_score": score, "cf_score": 0.0, "popularity_score": 0.0, "freshness_score": 0.0})
+            for product_id, score in candidates
+        ]
+    
+    # Compute final scores
+    ranked_results = []
+    
+    for product_id, search_score in candidates:
+        if product_id not in features:
+            logger.warning(
+                "ranking_product_features_missing",
+                product_id=product_id,
+                is_search=is_search,
+                user_id=user_id,
+            )
+            continue
+        
+        product_features = features[product_id]
+        popularity_score = product_features.get("popularity_score", 0.0)
+        freshness_score = product_features.get("freshness_score", 0.0)
+        
+        # For recommendations, search_score is 0
+        if not is_search:
+            search_score = 0.0
+        
+        # cf_score is 0 in Phase 1
+        cf_score = 0.0
+        
+        # Compute final score
+        final_score = compute_final_score(
+            search_score=search_score,
+            cf_score=cf_score,
+            popularity_score=popularity_score,
+            freshness_score=freshness_score
+        )
+        
+        # Create breakdown for explainability
+        breakdown = {
+            "search_score": search_score,
+            "cf_score": cf_score,
+            "popularity_score": popularity_score,
+            "freshness_score": freshness_score
+        }
+        
+        # Log ranking for each product
+        logger.debug(
+            "ranking_product_scored",
+            product_id=product_id,
+            final_score=final_score,
+            score_breakdown=breakdown,
+            feature_values={
+                "popularity_score": popularity_score,
+                "freshness_score": freshness_score,
+            },
+            is_search=is_search,
+            user_id=user_id,
+        )
+        
+        ranked_results.append((product_id, final_score, breakdown))
+    
+    # Sort by final_score descending
+    ranked_results.sort(key=lambda x: x[1], reverse=True)
+    
+    logger.info(
+        "ranking_completed",
+        is_search=is_search,
+        user_id=user_id,
+        ranked_count=len(ranked_results),
+        candidates_count=len(candidates),
+    )
+```
+
+**Ranking Log Events:**
+- `ranking_started`: Ranking initiated (includes `is_search`, `user_id`, `candidates_count`, `weights`)
+- `ranking_completed`: Ranking finished (includes `is_search`, `user_id`, `ranked_count`, `candidates_count`)
+- `ranking_product_scored`: Individual product scoring (DEBUG level, includes `product_id`, `final_score`, `score_breakdown`)
+
+### Example Log Entry
+
+**JSON Format (Production):**
+```json
+{
+  "timestamp": "2026-01-02T10:30:45.123456Z",
+  "level": "INFO",
+  "service": "beamai_search_api",
+  "trace_id": "abc123-def456-ghi789",
+  "request_id": "req-123-456",
+  "user_id": "user_789",
+  "event": "search_completed",
+  "query": "running shoes",
+  "results_count": 42,
+  "latency_ms": 87,
+  "cache_hit": false
+}
+```
+
+**Console Format (Development):**
+```
+2026-01-02T10:30:45.123456Z [info     ] search_completed          [beamai_search_api] cache_hit=False latency_ms=87 query="running shoes" request_id=req-123-456 results_count=42 trace_id=abc123-def456-ghi789 user_id=user_789
+```
 
 ---
 

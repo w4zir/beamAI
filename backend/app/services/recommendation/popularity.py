@@ -5,11 +5,11 @@ According to RECOMMENDATION_DESIGN.md:
 - Baseline Models: Global popularity, Category-level popularity
 - Cold Start Strategy: Popularity-based fallback
 """
-import logging
 from typing import List, Optional
+from app.core.logging import get_logger
 from app.core.database import get_supabase_client
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def get_popularity_recommendations(
@@ -34,7 +34,7 @@ def get_popularity_recommendations(
     """
     client = get_supabase_client()
     if not client:
-        logger.error("Failed to get Supabase client")
+        logger.error("popularity_recommendations_db_connection_failed")
         return []
     
     try:
@@ -54,17 +54,33 @@ def get_popularity_recommendations(
         response = query.execute()
         
         if not response.data:
-            logger.warning("No products found for recommendations")
+            logger.warning(
+                "popularity_recommendations_no_products",
+                user_id=user_id,
+                category=category,
+            )
             return []
         
         # Extract product IDs
         product_ids = [product["id"] for product in response.data]
         
-        logger.info(f"Popularity recommendations returned {len(product_ids)} candidates")
+        logger.info(
+            "popularity_recommendations_completed",
+            user_id=user_id,
+            category=category,
+            candidates_count=len(product_ids),
+        )
         return product_ids
         
     except Exception as e:
-        logger.error(f"Error getting popularity recommendations: {e}", exc_info=True)
+        logger.error(
+            "popularity_recommendations_error",
+            user_id=user_id,
+            category=category,
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
+        )
         return []
 
 
