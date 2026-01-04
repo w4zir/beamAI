@@ -11,6 +11,8 @@ from pydantic import BaseModel
 from app.core.logging import get_logger, set_user_id
 from app.core.metrics import (
     record_search_zero_result,
+    record_cache_hit,
+    record_cache_miss,
     record_ranking_score,
 )
 from app.services.recommendation.popularity import get_popularity_recommendations
@@ -42,6 +44,9 @@ async def recommend(
     """
     start_time = time.time()
     # TODO: Implement caching in Phase 2 - cache hits/misses will be recorded when implemented
+    
+    # Record cache miss (since caching not implemented yet)
+    record_cache_miss("recommendation")
     
     # Set user_id in context
     set_user_id(user_id)
