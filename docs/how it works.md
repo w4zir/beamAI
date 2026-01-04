@@ -1473,6 +1473,173 @@ def hybrid_search(query: str, limit: int = 50) -> List[Tuple[str, float]]:
 
 ---
 
+## Collaborative Filtering (Phase 3.2)
+
+The collaborative filtering service implements **Implicit ALS (Alternating Least Squares)** to compute `user_product_affinity` scores for personalized recommendations.
+
+### Architecture
+
+Collaborative filtering consists of two main components:
+
+1. **Offline Training**: Batch script trains Implicit ALS model from user-product interactions
+2. **Online Serving**: CF service loads model artifacts and computes scores on-demand during ranking
+
+### Model Training
+
+The CF model is trained offline using a batch script:
+
+```python:backend/scripts/train_cf_model.py
+# Key steps:
+1. Extract user-product interactions from events table (last 90 days)
+2. Build sparse interaction matrix (CSR format)
+3. Train Implicit ALS model with configurable hyperparameters
+4. Save model artifacts (user_factors, item_factors, mappings, metadata)
+```
+
+**Model Parameters:**
+- `factors=50` - Number of latent factors
+- `regularization=0.1` - L2 regularization parameter
+- `iterations=15` - Number of ALS iterations
+- `alpha=1.0` - Confidence scaling for implicit feedback
+
+**Event Weights:**
+- Uses same weights as popularity scoring: `purchase=3.0`, `add_to_cart=2.0`, `view=1.0`
+- Ensures consistency across feature computation
+
+**Model Storage:**
+- Directory: `backend/data/models/cf/`
+- Files:
+  - `user_factors.npy` - User factor matrix
+  - `item_factors.npy` - Item factor matrix
+  - `user_id_mapping.json` - User ID to matrix index mapping
+  - `product_id_mapping.json` - Product ID to matrix index mapping
+  - `model_metadata.json` - Version, training date, parameters, metrics
+
+### Model Loading
+
+The CF service loads model artifacts on application startup:
+
+```python:backend/app/services/recommendation/collaborative.py
+def initialize(self) -> bool:
+    """
+    Initialize service: load model artifacts.
+    
+    Returns:
+        True if model loaded successfully, False otherwise
+    """
+    # Load metadata, mappings, and factor matrices
+    # Validate dimensions
+    # Set _available flag
+```
+
+**Graceful Degradation:**
+- If model files are missing, CF service is unavailable
+- System continues with `cf_score = 0.0` (no errors thrown)
+- Logs warning messages for monitoring
+
+### CF Score Computation
+
+CF scores are computed on-demand during ranking:
+
+```python:backend/app/services/recommendation/collaborative.py
+def compute_user_product_affinity(user_id: str, product_id: str) -> float:
+    """
+    Compute CF score for a user-product pair.
+    
+    Returns:
+        CF score between 0.0 and 1.0 (normalized using sigmoid)
+    """
+    # Check cold start
+    # Get user factors and product factors
+    # Compute dot product: score = dot(user_factors, item_factors)
+    # Normalize to [0, 1] using sigmoid
+```
+
+**Scoring Logic:**
+- CF score = `dot(user_factors, item_factors)`
+- Normalized to [0, 1] range using sigmoid: `1 / (1 + exp(-raw_score))`
+- Scores are cached per-request (in-memory, not persistent)
+
+**Batch Scoring:**
+- `compute_user_product_affinities()` computes scores for multiple products at once
+- More efficient than individual calls
+
+### Cold Start Handling
+
+The system handles cold start cases gracefully:
+
+**New Users (< 5 interactions):**
+- Returns `cf_score = 0.0`
+- Falls back to popularity-based recommendations
+- Tracks interaction count via database query
+
+**New Products (not in training):**
+- Returns `cf_score = 0.0`
+- Relies on other features (popularity, freshness) for ranking
+
+**Cold Start Metrics:**
+- Tracked via `cf_cold_start_total` counter with labels (`new_user`, `new_product`)
+
+### Integration with Ranking Service
+
+CF scores are integrated into the Phase 1 ranking formula:
+
+```python:backend/app/services/ranking/score.py
+# In rank_products():
+if user_id and cf_service and cf_service.is_available():
+    cf_scores = cf_service.compute_user_product_affinities(user_id, product_ids)
+else:
+    cf_scores = {}  # Falls back to cf_score = 0.0
+
+# Use CF scores in compute_final_score():
+final_score = (
+    0.4 * search_score +
+    0.3 * cf_score +  # Now uses actual CF scores when available
+    0.2 * popularity_score +
+    0.1 * freshness_score
+)
+```
+
+**Behavior:**
+- CF scores computed only when `user_id` is provided
+- If CF service unavailable, uses `cf_score = 0.0` (backward compatible)
+- CF scores included in ranking breakdown for explainability
+
+### Metrics & Monitoring
+
+**Prometheus Metrics:**
+- `cf_scoring_requests_total` - Counter for CF scoring requests
+- `cf_scoring_latency_seconds` - Histogram for CF scoring latency
+- `cf_cold_start_total` - Counter for cold start cases (by type)
+- `cf_model_staleness_seconds` - Gauge for time since last training
+
+**Metrics Recording:**
+- Metrics recorded in `compute_user_product_affinity()` method
+- Cold start metrics recorded when handling new users/products
+
+### Training Script Usage
+
+Train CF model manually:
+
+```bash
+# Train with default parameters (last 90 days)
+python backend/scripts/train_cf_model.py
+
+# Train with custom parameters
+python backend/scripts/train_cf_model.py \
+    --days-back 180 \
+    --factors 100 \
+    --regularization 0.05 \
+    --iterations 20 \
+    --alpha 1.5
+```
+
+**Training Frequency:**
+- Manual trigger for Phase 3.2
+- Planned: Automated nightly batch job in future phases
+
+---
+
 ## Recommendation Service
 
 The recommendation service provides **popularity-based recommendations** as the baseline model.
@@ -2136,7 +2303,7 @@ The BeamAI system implements a **production-grade search and recommendation plat
 - ⏳ **Phase 1.3**: Distributed tracing (OpenTelemetry) - Not yet implemented
 - ⏳ **Phase 1.4**: Alerting rules - Not yet implemented
 - ✅ **Phase 3.1**: Semantic search with FAISS and hybrid search
-- ⏳ **Phase 3.2**: Collaborative filtering - Not yet implemented
+- ✅ **Phase 3.2**: Collaborative filtering with Implicit ALS
 - ⏳ **Phase 3.3**: Feature store - Not yet implemented
 - ⏳ **Phase 3.4**: Query enhancement - Not yet implemented
 
@@ -2149,4 +2316,13 @@ The system is designed to scale from local development to production environment
 - **Offline Index Building**: ✅ FAISS index built from product embeddings in batch job
 - **Graceful Fallback**: ✅ System continues with keyword-only search if semantic search unavailable
 - **Metrics**: ✅ Semantic search metrics (latency, request count, index memory usage) tracked in Prometheus
+
+### Phase 3.2 Features (✅ COMPLETE)
+
+- **Collaborative Filtering**: ✅ Implicit ALS model for user-product affinity computation
+- **Offline Training**: ✅ Batch script trains CF model from user-product interactions
+- **Online Serving**: ✅ CF service loads model and computes scores on-demand during ranking
+- **Cold Start Handling**: ✅ New users/products get `cf_score = 0.0`, fallback to popularity
+- **Integration**: ✅ CF scores integrated into Phase 1 ranking formula (replaces `cf_score = 0.0`)
+- **Metrics**: ✅ CF scoring metrics (latency, request count, cold start) tracked in Prometheus
 

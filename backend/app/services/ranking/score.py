@@ -13,11 +13,12 @@ For search: search_score = max(search_keyword_score, search_semantic_score)
   - Hybrid search already computes max(keyword_score, semantic_score) per RANKING_LOGIC.md
   - This service receives the merged search_score from hybrid search
 For recommendations: search_score = 0
-cf_score = 0 (no collaborative filtering in Phase 1)
+cf_score: Uses collaborative filtering scores when available (Phase 3.2), otherwise 0.0
 """
 from typing import List, Tuple, Dict, Optional
 from app.core.logging import get_logger
 from app.services.ranking.features import get_product_features
+from app.services.recommendation.collaborative import get_collaborative_filtering_service
 
 logger = get_logger(__name__)
 
@@ -115,6 +116,27 @@ def rank_products(
             for product_id, score in candidates
         ]
     
+    # Get CF scores if user_id provided and CF service available
+    cf_scores: Dict[str, float] = {}
+    cf_service = get_collaborative_filtering_service()
+    if user_id and cf_service and cf_service.is_available():
+        try:
+            cf_scores = cf_service.compute_user_product_affinities(user_id, product_ids)
+            logger.debug(
+                "ranking_cf_scores_computed",
+                user_id=user_id,
+                products_count=len(cf_scores),
+            )
+        except Exception as e:
+            logger.warning(
+                "ranking_cf_computation_failed",
+                user_id=user_id,
+                error=str(e),
+                error_type=type(e).__name__,
+                message="Falling back to cf_score=0.0",
+            )
+            cf_scores = {}
+    
     # Compute final scores
     ranked_results = []
     
@@ -136,8 +158,8 @@ def rank_products(
         if not is_search:
             search_score = 0.0
         
-        # cf_score is 0 in Phase 1
-        cf_score = 0.0
+        # Get CF score (0.0 if not available)
+        cf_score = cf_scores.get(product_id, 0.0)
         
         # Compute final score
         final_score = compute_final_score(
@@ -164,6 +186,7 @@ def rank_products(
             feature_values={
                 "popularity_score": popularity_score,
                 "freshness_score": freshness_score,
+                "cf_score": cf_score,
             },
             is_search=is_search,
             user_id=user_id,

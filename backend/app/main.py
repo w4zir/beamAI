@@ -8,6 +8,7 @@ from .core.middleware import TraceIDMiddleware
 from .core.metrics import record_http_request
 from .routes import health, search, recommend, events, metrics
 from .services.search.semantic import initialize_semantic_search
+from .services.recommendation.collaborative import initialize_collaborative_filtering
 
 # Configure structured logging
 # Use JSON output in production (containerized), console output in development
@@ -52,6 +53,18 @@ async def startup_event():
         logger.info(
             "app_startup_semantic_search_unavailable",
             message="Semantic search not available. Using keyword search only. Run build_faiss_index.py to enable semantic search.",
+        )
+    
+    # Initialize collaborative filtering (loads CF model if available)
+    # This will gracefully fail if model is not available, falling back to cf_score=0.0
+    cf_initialized = initialize_collaborative_filtering()
+    
+    if cf_initialized:
+        logger.info("app_startup_collaborative_filtering_ready")
+    else:
+        logger.info(
+            "app_startup_collaborative_filtering_unavailable",
+            message="Collaborative filtering not available. Using cf_score=0.0. Run train_cf_model.py to enable collaborative filtering.",
         )
     
     logger.info("app_startup_completed")
