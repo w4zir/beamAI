@@ -1,0 +1,23 @@
+# Prometheus configuration for BeamAI Search & Recommendation API
+# Scrapes metrics from the FastAPI backend
+
+global:
+  scrape_interval: 15s  # Scrape targets every 15 seconds
+  evaluation_interval: 15s  # Evaluate rules every 15 seconds
+  external_labels:
+    cluster: 'beamai-local'
+    environment: 'development'
+
+# Scrape configurations
+scrape_configs:
+  # Scrape the FastAPI backend metrics endpoint
+  - job_name: 'beamai-backend'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['backend:8000']
+        labels:
+          service: 'beamai-backend'
+          component: 'api'
+
