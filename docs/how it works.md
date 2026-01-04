@@ -6,12 +6,13 @@ This document provides a detailed explanation of each component of the BeamAI se
 
 1. [System Architecture](#system-architecture)
 2. [Structured Logging](#structured-logging)
-3. [Search Service](#search-service)
-4. [Recommendation Service](#recommendation-service)
-5. [Ranking Service](#ranking-service)
-6. [Feature Computation](#feature-computation)
-7. [Event Tracking](#event-tracking)
-8. [Request Flow](#request-flow)
+3. [Prometheus Metrics Collection](#prometheus-metrics-collection)
+4. [Search Service](#search-service)
+5. [Recommendation Service](#recommendation-service)
+6. [Ranking Service](#ranking-service)
+7. [Feature Computation](#feature-computation)
+8. [Event Tracking](#event-tracking)
+9. [Request Flow](#request-flow)
 
 ---
 
@@ -418,6 +419,427 @@ Ranking service logs scoring operations:
 ```
 2026-01-02T10:30:45.123456Z [info     ] search_completed          [beamai_search_api] cache_hit=False latency_ms=87 query="running shoes" request_id=req-123-456 results_count=42 trace_id=abc123-def456-ghi789 user_id=user_789
 ```
+
+---
+
+## Prometheus Metrics Collection
+
+The system implements comprehensive metrics collection using Prometheus (Phase 1.2 implementation) following the RED metrics pattern (Rate, Errors, Duration) plus business and resource metrics.
+
+### Metrics Architecture
+
+```
+Backend API (FastAPI)
+    ↓ (exposes /metrics endpoint)
+Prometheus (scrapes every 15s)
+    ↓ (data source)
+Grafana (visualizes in dashboards)
+```
+
+### Metrics Module
+
+Metrics are defined in `app/core/metrics.py` using the `prometheus-client` library:
+
+```38:65:backend/app/core/metrics.py
+# ============================================================================
+# RED METRICS - Rate, Errors, Duration
+# ============================================================================
+
+# Rate: HTTP requests total
+http_requests_total = Counter(
+    "http_requests_total",
+    "Total number of HTTP requests",
+    ["method", "endpoint", "status"],
+    registry=registry,
+)
+
+# Errors: HTTP errors total (separate 4xx and 5xx)
+http_errors_total = Counter(
+    "http_errors_total",
+    "Total number of HTTP errors",
+    ["method", "endpoint", "status_code"],
+    registry=registry,
+)
+
+# Duration: HTTP request latency histogram
+http_request_duration_seconds = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request latency in seconds",
+    ["method", "endpoint"],
+    buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+    registry=registry,
+)
+```
+
+### RED Metrics (Rate, Errors, Duration)
+
+**Rate Metrics:**
+
+Tracks request rate per endpoint using counters:
+
+```167:190:backend/app/core/metrics.py
+def record_http_request(
+    method: str,
+    endpoint: str,
+    status_code: int,
+    duration_seconds: float,
+) -> None:
+    """
+    Record HTTP request metrics (RED metrics).
+    
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        endpoint: Normalized endpoint path
+        status_code: HTTP status code
+        duration_seconds: Request duration in seconds
+    """
+    # Normalize endpoint
+    normalized_endpoint = normalize_endpoint(endpoint)
+    
+    # Record request count
+    http_requests_total.labels(
+        method=method,
+        endpoint=normalized_endpoint,
+        status=str(status_code),
+    ).inc()
+```
+
+**Error Metrics:**
+
+Separate tracking for 4xx (client errors) and 5xx (server errors):
+
+```192:198:backend/app/core/metrics.py
+    # Record errors (4xx and 5xx)
+    if status_code >= 400:
+        http_errors_total.labels(
+            method=method,
+            endpoint=normalized_endpoint,
+            status_code=str(status_code),
+        ).inc()
+```
+
+**Duration Metrics:**
+
+Latency histogram with configurable buckets for percentile calculations:
+
+```200:204:backend/app/core/metrics.py
+    # Record duration
+    http_request_duration_seconds.labels(
+        method=method,
+        endpoint=normalized_endpoint,
+    ).observe(duration_seconds)
+```
+
+**Buckets:** [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0] seconds
+- Enables calculation of p50, p95, p99, p999 percentiles
+- Example PromQL: `histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))`
+
+### Business Metrics
+
+**Zero-Result Searches:**
+
+Tracks searches that return no results:
+
+```72:77:backend/app/core/metrics.py
+# Zero-result searches
+search_zero_results_total = Counter(
+    "search_zero_results_total",
+    "Total number of searches that returned zero results",
+    ["query_pattern"],  # Can be normalized query pattern for grouping
+    registry=registry,
+)
+```
+
+Recording zero results:
+
+```207:216:backend/app/core/metrics.py
+def record_search_zero_result(query: Optional[str] = None) -> None:
+    """
+    Record a zero-result search.
+    
+    Args:
+        query: Search query (optional, for pattern matching)
+    """
+    # Normalize query pattern (first 20 chars or "empty")
+    query_pattern = "empty" if not query else query[:20].lower()
+    search_zero_results_total.labels(query_pattern=query_pattern).inc()
+```
+
+**Cache Metrics:**
+
+Tracks cache hits and misses by cache type:
+
+```79:92:backend/app/core/metrics.py
+# Cache hits and misses
+cache_hits_total = Counter(
+    "cache_hits_total",
+    "Total number of cache hits",
+    ["cache_type"],  # e.g., "search", "recommendation", "features"
+    registry=registry,
+)
+
+cache_misses_total = Counter(
+    "cache_misses_total",
+    "Total number of cache misses",
+    ["cache_type"],
+    registry=registry,
+)
+```
+
+**Ranking Score Distribution:**
+
+Histogram of ranking scores for analysis:
+
+```94:101:backend/app/core/metrics.py
+# Ranking score distribution
+ranking_score_distribution = Histogram(
+    "ranking_score_distribution",
+    "Distribution of ranking scores",
+    ["product_id"],
+    buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    registry=registry,
+)
+```
+
+### Resource Metrics
+
+**CPU and Memory Usage:**
+
+System resource metrics updated on each scrape:
+
+```107:119:backend/app/core/metrics.py
+# CPU usage gauge
+system_cpu_usage_percent = Gauge(
+    "system_cpu_usage_percent",
+    "System CPU usage percentage",
+    registry=registry,
+)
+
+# Memory usage gauge
+system_memory_usage_bytes = Gauge(
+    "system_memory_usage_bytes",
+    "System memory usage in bytes",
+    registry=registry,
+)
+```
+
+Updating resource metrics:
+
+```250:274:backend/app/core/metrics.py
+def update_resource_metrics() -> None:
+    """
+    Update system resource metrics (CPU, memory).
+    
+    This should be called periodically (e.g., every 10-30 seconds)
+    or on-demand when metrics are scraped.
+    """
+    try:
+        # CPU usage percentage
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        system_cpu_usage_percent.set(cpu_percent)
+        
+        # Memory usage in bytes
+        memory = psutil.virtual_memory()
+        system_memory_usage_bytes.set(memory.used)
+        
+    except ImportError:
+        # psutil not installed - skip resource metrics
+        logger.debug("metrics_resource_update_skipped", reason="psutil not available")
+    except Exception as e:
+        logger.warning(
+            "metrics_resource_update_failed",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+```
+
+**Database Connection Pool:**
+
+Tracks connection pool utilization:
+
+```121:127:backend/app/core/metrics.py
+# Database connection pool (placeholder - will be implemented when connection pooling is added)
+db_connection_pool_size = Gauge(
+    "db_connection_pool_size",
+    "Database connection pool size",
+    ["state"],  # "active", "idle", "total"
+    registry=registry,
+)
+```
+
+### Metrics Endpoint
+
+The `/metrics` endpoint exposes Prometheus-formatted metrics:
+
+```17:42:backend/app/routes/metrics.py
+@router.get("", response_class=PlainTextResponse)
+async def metrics():
+    """
+    Prometheus metrics endpoint.
+    
+    Returns metrics in Prometheus text format for scraping.
+    No authentication required (standard Prometheus practice).
+    """
+    try:
+        metrics_data = get_metrics()
+        return Response(
+            content=metrics_data,
+            media_type=get_metrics_content_type(),
+        )
+    except Exception as e:
+        logger.error(
+            "metrics_endpoint_error",
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
+        )
+        # Return empty metrics on error (better than failing completely)
+        return Response(
+            content=b"# Error collecting metrics\n",
+            media_type=get_metrics_content_type(),
+        )
+```
+
+Metrics are generated on-demand when scraped:
+
+```291:301:backend/app/core/metrics.py
+def get_metrics() -> bytes:
+    """
+    Get Prometheus metrics in text format.
+    
+    Returns:
+        Prometheus metrics text format
+    """
+    # Update resource metrics before returning
+    update_resource_metrics()
+    
+    return generate_latest(registry)
+```
+
+### Metrics Recording in Middleware
+
+Metrics are automatically recorded for all HTTP requests via middleware:
+
+```97:130:backend/app/core/middleware.py
+            # Record metrics
+            record_http_request(
+                method=request.method,
+                endpoint=request.url.path,
+                status_code=response.status_code,
+                duration_seconds=process_time,
+            )
+```
+
+**Endpoint Normalization:**
+
+Dynamic segments (like user_id) are normalized to avoid high cardinality:
+
+```134:164:backend/app/core/metrics.py
+def normalize_endpoint(path: str) -> str:
+    """
+    Normalize endpoint path for metrics.
+    
+    Replaces dynamic segments (like user_id, product_id) with placeholders
+    to avoid high cardinality in metrics.
+    
+    Examples:
+        /recommend/user123 -> /recommend/{user_id}
+        /search?q=test -> /search
+        /health -> /health
+    
+    Args:
+        path: Request path
+        
+    Returns:
+        Normalized endpoint path
+    """
+    # Remove query parameters
+    if "?" in path:
+        path = path.split("?")[0]
+    
+    # Normalize common patterns
+    # /recommend/{user_id} pattern
+    if path.startswith("/recommend/"):
+        parts = path.split("/")
+        if len(parts) >= 3:
+            return "/recommend/{user_id}"
+    
+    # Keep other paths as-is (they're already normalized)
+    return path
+```
+
+### Prometheus Configuration
+
+Prometheus scrapes metrics every 15 seconds from the backend:
+
+```1:23:monitoring/prometheus/prometheus.yml
+# Prometheus configuration for BeamAI Search & Recommendation API
+# Scrapes metrics from the FastAPI backend
+
+global:
+  scrape_interval: 15s  # Scrape targets every 15 seconds
+  evaluation_interval: 15s  # Evaluate rules every 15 seconds
+  external_labels:
+    cluster: 'beamai-local'
+    environment: 'development'
+
+# Scrape configurations
+scrape_configs:
+  # Scrape the FastAPI backend metrics endpoint
+  - job_name: 'beamai-backend'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['backend:8000']
+        labels:
+          service: 'beamai-backend'
+          component: 'api'
+```
+
+### Grafana Dashboards
+
+Five dashboards are automatically provisioned for visualization:
+
+1. **Service Health Overview**: Request rate, error rate, latency percentiles, CPU/memory
+2. **Search Performance**: Search-specific metrics (rate, latency, zero-results, cache hits)
+3. **Recommendation Performance**: Recommendation-specific metrics
+4. **Database Health**: Connection pool usage and database metrics
+5. **Cache Performance**: Cache hit/miss rates by type
+
+**Example PromQL Queries Used in Dashboards:**
+
+```promql
+# Request rate per endpoint
+rate(http_requests_total[5m])
+
+# Error rate
+rate(http_errors_total[5m])
+
+# p95 latency
+histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+
+# Cache hit rate
+rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m]))
+
+# Zero-result rate
+rate(search_zero_results_total[5m]) / rate(http_requests_total{endpoint="/search"}[5m])
+```
+
+### Metrics Best Practices
+
+1. **Low Cardinality Labels**: Endpoints are normalized to avoid high cardinality
+2. **Histogram Buckets**: Configured for meaningful percentile calculations
+3. **Resource Metrics**: Updated on-demand (not continuously) to reduce overhead
+4. **Error Handling**: Metrics collection failures don't break the application
+5. **Standard Naming**: Follows Prometheus naming conventions (`_total`, `_seconds`)
+
+### Integration with Logging
+
+Metrics complement structured logging:
+- **Logs**: Detailed context per request (trace_id, query, user_id)
+- **Metrics**: Aggregated statistics over time (rate, percentiles, distributions)
+- **Correlation**: Use trace_id from logs to correlate with metrics
 
 ---
 
@@ -1269,6 +1691,13 @@ The BeamAI system implements a **production-grade search and recommendation plat
 - **On-demand freshness**: Freshness scores computed from creation dates
 - **Graceful degradation**: Fallback mechanisms at every layer
 - **Event-driven analytics**: Append-only event tracking for feature computation
+- **Comprehensive observability**: Structured JSON logging with trace IDs and Prometheus metrics collection
+- **Metrics visualization**: Grafana dashboards for RED metrics, business metrics, and resource monitoring
+
+**Observability Stack:**
+- **Logs**: Structured JSON logging with trace ID propagation for request correlation
+- **Metrics**: Prometheus metrics (RED metrics, business metrics, resource metrics) exposed at `/metrics`
+- **Dashboards**: Five Grafana dashboards for service health, search/recommendation performance, database health, and cache performance
 
 The system is designed to scale from local development to production environments without architectural rewrites.
 
