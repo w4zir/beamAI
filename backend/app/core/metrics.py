@@ -139,6 +139,36 @@ semantic_search_fallback_total = Counter(
 )
 
 # ============================================================================
+# COLLABORATIVE FILTERING METRICS
+# ============================================================================
+
+cf_scoring_requests_total = Counter(
+    "cf_scoring_requests_total",
+    "Total number of CF scoring requests",
+    registry=registry,
+)
+
+cf_scoring_latency_seconds = Histogram(
+    "cf_scoring_latency_seconds",
+    "CF scoring latency in seconds",
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
+    registry=registry,
+)
+
+cf_cold_start_total = Counter(
+    "cf_cold_start_total",
+    "Total number of cold start cases",
+    ["cold_start_type"],  # "new_user", "new_product"
+    registry=registry,
+)
+
+cf_model_staleness_seconds = Gauge(
+    "cf_model_staleness_seconds",
+    "Time since last model training in seconds",
+    registry=registry,
+)
+
+# ============================================================================
 # RESOURCE METRICS
 # ============================================================================
 

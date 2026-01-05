@@ -98,7 +98,7 @@ async def recommend(
                     RecommendResult(
                         product_id=product_id,
                         score=final_score,
-                        reason=f"Ranked score: {final_score:.3f} (popularity: {breakdown['popularity_score']:.3f}, freshness: {breakdown['freshness_score']:.3f})"
+                        reason=f"Ranked score: {final_score:.3f} (cf: {breakdown['cf_score']:.3f}, popularity: {breakdown['popularity_score']:.3f}, freshness: {breakdown['freshness_score']:.3f})"
                     )
                 )
         except Exception as ranking_error:

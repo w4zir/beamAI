@@ -171,6 +171,63 @@ ENABLE_SEMANTIC_SEARCH=true
 
 If `ENABLE_SEMANTIC_SEARCH` is not set or `false`, the system uses keyword search only.
 
+### 9. Train Collaborative Filtering Model (Optional - Phase 3.2)
+
+To enable collaborative filtering for personalized recommendations, train the CF model:
+
+```bash
+cd backend
+python scripts/train_cf_model.py
+```
+
+This script:
+- Extracts user-product interactions from events table (last 90 days by default)
+- Builds sparse interaction matrix (CSR format)
+- Trains Implicit ALS model with configurable hyperparameters
+- Saves model artifacts to `backend/data/models/cf/`
+
+**Model Artifacts:**
+- `user_factors.npy` - User factor matrix
+- `item_factors.npy` - Item factor matrix
+- `user_id_mapping.json` - User ID to matrix index mapping
+- `product_id_mapping.json` - Product ID to matrix index mapping
+- `model_metadata.json` - Version, training date, parameters, metrics
+
+**Training Parameters:**
+
+```bash
+# Train with default parameters (last 90 days)
+python scripts/train_cf_model.py
+
+# Train with custom parameters
+python scripts/train_cf_model.py \
+    --days-back 180 \
+    --factors 100 \
+    --regularization 0.05 \
+    --iterations 20 \
+    --alpha 1.5 \
+    --min-interactions 1
+
+# Train with lower validation thresholds (for development/testing with limited data)
+python scripts/train_cf_model.py \
+    --min-matrix-users 5 \
+    --min-matrix-products 5 \
+    --min-matrix-interactions 50
+```
+
+**Parameters:**
+- `--days-back`: Number of days to look back for interactions (default: 90, use 0 for all time)
+- `--factors`: Number of latent factors (default: 50)
+- `--regularization`: L2 regularization parameter (default: 0.1)
+- `--iterations`: Number of ALS iterations (default: 15)
+- `--alpha`: Confidence scaling for implicit feedback (default: 1.0)
+- `--min-interactions`: Minimum interactions per user-product pair (default: 1)
+- `--min-matrix-users`: Minimum number of users required for matrix validation (default: 10)
+- `--min-matrix-products`: Minimum number of products required for matrix validation (default: 10)
+- `--min-matrix-interactions`: Minimum number of interactions required for matrix validation (default: 100)
+
+**Note:** The CF model is automatically loaded on application startup. If the model is not available, the system falls back to `cf_score = 0.0` (no errors thrown). CF scores are only computed when `user_id` is provided in recommendation requests.
+
 ---
 
 ## Running the System
@@ -454,7 +511,72 @@ curl "http://localhost:8000/search?q=comfortable%20shoes&k=5"
 
 **Note**: The semantic search service loads the FAISS index on application startup. If the index is not available, the system gracefully falls back to keyword-only search without errors.
 
-### 8. Test Frontend
+### 9. Test Collaborative Filtering (Phase 3.2)
+
+**Status**: ✅ Collaborative filtering is implemented and available.
+
+**Train CF model:**
+```bash
+cd backend
+python scripts/train_cf_model.py
+```
+
+**Expected output:**
+```
+[INFO] cf_training_pipeline_started
+[INFO] cf_extracting_interactions days_back=90
+[INFO] cf_data_extraction_completed total_events=1000 unique_pairs=500
+[INFO] cf_building_matrix
+[INFO] cf_matrix_building_completed num_users=100 num_products=50 num_interactions=500 sparsity=0.90
+[INFO] cf_training_started factors=50 regularization=0.1 iterations=15 alpha=1.0
+[INFO] cf_training_completed training_time_seconds=2.45
+[INFO] cf_saving_model_artifacts
+[INFO] cf_factors_saved user_factors_shape=(100, 50) item_factors_shape=(50, 50)
+[INFO] cf_model_saved
+[INFO] cf_training_pipeline_completed total_time_seconds=3.12 num_users=100 num_products=50
+```
+
+**Restart backend** to load the CF model:
+```bash
+npm run backend
+```
+
+**Verify CF model is loaded:**
+- Check backend startup logs for `app_startup_collaborative_filtering_ready`
+- If model is missing, logs will show `app_startup_collaborative_filtering_unavailable` (non-fatal)
+
+**Test recommendations with CF:**
+```bash
+# Get recommendations for a user (CF scores included if model available)
+curl "http://localhost:8000/recommend/user_123?k=10"
+```
+
+**Expected response (with CF):**
+```json
+[
+  {
+    "product_id": "prod_456",
+    "score": 0.72,
+    "reason": "Ranked score: 0.720 (cf: 0.650, popularity: 0.800, freshness: 0.500)"
+  },
+  ...
+]
+```
+
+**Verify CF is working:**
+- Check response `reason` field includes `cf:` score (should be > 0.0 for users with interactions)
+- Check backend logs for `ranking_cf_scores_computed` events
+- Test with different users to see personalized recommendations
+- New users (< 5 interactions) will have `cf_score = 0.0` (cold start)
+
+**Cold Start Behavior:**
+- Users with < 5 interactions: `cf_score = 0.0`, falls back to popularity
+- Products not in training: `cf_score = 0.0`, relies on other features
+- System continues normally even if CF model unavailable
+
+**Note**: The CF model is automatically loaded on application startup. If the model is not available, the system gracefully falls back to `cf_score = 0.0` without errors. CF scores are only computed when `user_id` is provided in recommendation requests.
+
+### 10. Test Frontend
 
 1. Open http://localhost:5173 in your browser
 2. Navigate to the Search page
@@ -981,6 +1103,49 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 python -m app.main
 ```
 
+**Problem: Failed to build wheel for `implicit` package (Windows)**
+The `implicit` package requires C++ compilation on Windows. Even with Visual Studio Build Tools installed, the package's CMakeLists.txt may have compatibility issues with newer VS versions (e.g., VS 2026). Choose one of these solutions:
+
+**Solution 1: Use Conda (Recommended for Windows)**
+Conda provides pre-built binaries for `implicit`, avoiding compilation issues:
+```powershell
+# If you have Anaconda/Miniconda installed:
+# Create conda environment
+conda create -n beamai python=3.12
+
+# Install implicit and dependencies from conda-forge (pre-built binaries)
+conda install -c conda-forge implicit scipy numpy
+
+# Install remaining dependencies
+conda run -n beamai pip install -r backend\requirements.txt
+
+# To use the environment:
+conda activate beamai
+# Or run commands with: conda run -n beamai <command>
+```
+
+**Solution 2: Use Docker (Easiest)**
+Docker handles all build dependencies automatically:
+```bash
+docker-compose up backend
+```
+
+**Solution 3: Install Visual Studio Build Tools (May Still Fail)**
+Even with Visual Studio Build Tools installed, `implicit` may fail due to CMake compatibility issues:
+1. Download and install [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)
+2. During installation, select "Desktop development with C++" workload
+3. Open "Developer Command Prompt for VS 2022" (not regular PowerShell)
+4. Navigate to project and activate venv
+5. Try installation (may still fail due to CMakeLists.txt bug)
+
+**Solution 4: Skip Collaborative Filtering (Temporary)**
+If you don't need collaborative filtering immediately, you can temporarily skip `implicit`:
+1. Comment out `implicit>=0.5.0` in `requirements.txt`
+2. Install other dependencies
+3. The system will work but CF features will be unavailable (falls back gracefully)
+
+**Note**: The `implicit` package is only required for collaborative filtering (Phase 3.2). The system will continue to work without it, but CF recommendations will be disabled.
+
 **Problem: Supabase connection fails**
 - Check `.env` file has correct `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
 - Ensure Supabase standalone container is running
@@ -1066,6 +1231,22 @@ python -m app.services.features.compute
 - Check that SentenceTransformers model downloads successfully (first run downloads model)
 - Verify sufficient disk space for index file
 - Check Python dependencies: `pip list | grep -E "(faiss|sentence-transformers)"`
+
+**Problem: Collaborative filtering not working**
+- Verify CF model exists: `ls backend/data/models/cf/user_factors.npy`
+- Check `train_cf_model.py` ran successfully (check logs)
+- Ensure sufficient events exist in database (need user-product interactions)
+- Verify backend startup logs show `app_startup_collaborative_filtering_ready`
+- If model is missing, system falls back to `cf_score = 0.0` (check logs for warnings)
+- Check minimum interactions: Users need >= 5 interactions for CF scores (cold start threshold)
+
+**Problem: CF model training fails**
+- Ensure events exist in database (run `seed_data.py` to create sample events)
+- Check that enough users and products have interactions (minimum: 10 users, 10 products, 100 interactions)
+- Verify database connection: `python scripts/test_supabase_connection.py`
+- Check Python dependencies: `pip list | grep -E "(implicit|scipy)"`
+- Verify sufficient disk space for model artifacts
+- Check training logs for specific error messages
 
 ### Feature Computation Issues
 
@@ -1287,6 +1468,9 @@ cd backend && python -m app.services.features.compute
 # Semantic Search (Phase 3.1)
 cd backend && python scripts/build_faiss_index.py
 
+# Collaborative Filtering (Phase 3.2)
+cd backend && python scripts/train_cf_model.py
+
 # Database
 cd backend && python scripts/seed_data.py
 ```
@@ -1308,10 +1492,11 @@ cd backend && python scripts/seed_data.py
 1. **Explore the API**: Visit http://localhost:8000/docs
 2. **Test search**: Try different queries and verify results
 3. **Test semantic search**: Build FAISS index and enable hybrid search
-4. **Track events**: Simulate user interactions
-5. **Monitor features**: Recompute features and see how scores change
-6. **Test structured logging**: Verify trace IDs appear in logs and response headers
-7. **Read architecture docs**: Understand system design in `specs/`
+4. **Test collaborative filtering**: Train CF model and verify personalized recommendations
+5. **Track events**: Simulate user interactions
+6. **Monitor features**: Recompute features and see how scores change
+7. **Test structured logging**: Verify trace IDs appear in logs and response headers
+8. **Read architecture docs**: Understand system design in `specs/`
 
 ### Observability Features
 
@@ -1329,6 +1514,8 @@ The system includes comprehensive observability features (Phase 1.1 & 1.2 - ✅ 
 - **Business Metrics**: Zero-result searches, cache hits/misses, ranking scores
 - **Resource Metrics**: CPU, memory, database connection pool usage
 - **Semantic Search Metrics**: Semantic search specific metrics (Phase 3.1)
+- **Collaborative Filtering Metrics**: CF scoring latency, cold start counts (Phase 3.2)
+- **Collaborative Filtering Metrics**: CF scoring latency, cold start counts (Phase 3.2)
 
 **Grafana Dashboards**:
 - Service Health Overview
