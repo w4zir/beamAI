@@ -20,6 +20,14 @@ from typing import Optional, Any, Dict
 import structlog
 from structlog.types import Processor
 
+# Import tracing functions (with try/except to handle case when tracing not configured)
+try:
+    from .tracing import get_trace_id_from_context
+except ImportError:
+    # If tracing module is not available, define a no-op function
+    def get_trace_id_from_context() -> Optional[str]:
+        return None
+
 # Context variable for trace ID propagation
 trace_id_var: ContextVar[Optional[str]] = ContextVar("trace_id", default=None)
 request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
@@ -38,9 +46,18 @@ def add_trace_context(
     Add trace context (trace_id, request_id, user_id) to log entries.
     
     This processor extracts context variables and adds them to every log entry.
+    Also integrates with OpenTelemetry to get trace ID from active span.
     """
-    # Add trace_id if available
+    # Add trace_id if available (from logging context or OpenTelemetry)
     trace_id = trace_id_var.get()
+    if not trace_id:
+        # Try to get trace ID from OpenTelemetry context
+        try:
+            trace_id = get_trace_id_from_context()
+        except Exception:
+            # If tracing is not configured, ignore
+            pass
+    
     if trace_id:
         event_dict["trace_id"] = trace_id
     
