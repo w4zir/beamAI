@@ -1,6 +1,24 @@
 # BeamAI - Search & Recommendation System
 
-A unified search and recommendation platform built with FastAPI (Python) backend and React (TypeScript) frontend, featuring Supabase for database and authentication.
+A production-grade unified search and recommendation platform built with FastAPI (Python) backend and React (TypeScript) frontend, featuring Supabase for database and authentication. Designed to scale from local development to production environments without architectural rewrites.
+
+## Current Status
+
+The system implements a comprehensive observability stack and advanced search capabilities:
+
+**✅ Implemented Features:**
+- **Observability (Phase 1)**: Structured logging, Prometheus metrics, distributed tracing (OpenTelemetry), and alerting rules
+- **Search Enhancements (Phase 2)**: Semantic search with FAISS, hybrid search, and query enhancement (spell correction, synonym expansion, classification)
+- **Recommendations (Phase 3)**: Collaborative filtering with Implicit ALS for personalized recommendations
+- **Core Features**: Keyword search, popularity-based recommendations, deterministic ranking, event tracking
+
+**📚 Documentation:**
+- **[How to Run](docs/how%20to%20run.md)** - Complete setup and testing guide
+- **[How It Works](docs/how%20it%20works.md)** - Detailed system architecture and algorithms
+- **[Implementation Plan](docs/implementation_plan.md)** - Phased roadmap to production
+- **[Specifications](specs/)** - Architecture, API contracts, and design documents
+
+For detailed feature status and roadmap, see [docs/implementation_plan.md](docs/implementation_plan.md).
 
 ## Tech Stack
 
@@ -20,7 +38,13 @@ A unified search and recommendation platform built with FastAPI (Python) backend
 - **Supabase Python Client** for database operations
 - **Pydantic** for data validation
 - **PostgreSQL Full Text Search** for keyword search
+- **FAISS** for semantic/vector search
+- **SentenceTransformers** for embeddings
+- **Implicit ALS** for collaborative filtering
 - **Ranking Service** with deterministic scoring
+- **Prometheus** for metrics collection
+- **OpenTelemetry** for distributed tracing
+- **Structlog** for structured logging
 
 ### Development Tools
 - **uv** for Python virtual environment and package management
@@ -85,6 +109,26 @@ python scripts/seed_data.py
 python -m app.services.features.compute
 ```
 
+**Optional: Build FAISS Index for Semantic Search**
+```bash
+# Build FAISS index for semantic search (optional)
+cd backend
+python scripts/build_faiss_index.py
+
+# Enable semantic search in .env: ENABLE_SEMANTIC_SEARCH=true
+```
+
+**Optional: Train Collaborative Filtering Model**
+```bash
+# Train CF model for personalized recommendations (optional)
+cd backend
+python scripts/train_cf_model.py
+
+# CF scores are automatically included when user_id is provided
+```
+
+See [docs/how to run.md](docs/how%20to%20run.md) for detailed setup instructions.
+
 ### 5. Run the Application
 
 ```bash
@@ -107,6 +151,12 @@ npm run frontend
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:8000
 - API Docs: http://localhost:8000/docs
+- Metrics: http://localhost:8000/metrics
+- Prometheus: http://localhost:9090 (if running via Docker Compose)
+- Grafana: http://localhost:3000 (if running via Docker Compose, default: admin/admin)
+- Jaeger: http://localhost:16686 (if running, for distributed tracing)
+
+See [docs/how to run.md](docs/how%20to%20run.md) for complete setup and testing instructions.
 
 ## Project Structure
 
@@ -144,9 +194,14 @@ npm run frontend
 
 ### Search & Recommendations
 - **Keyword Search**: PostgreSQL Full Text Search for product search
-- **Recommendations**: Popularity-based product recommendations
-- **Ranking**: Deterministic ranking using Phase 1 formula (search + popularity + freshness)
-- **Event Tracking**: Track user interactions (views, clicks) for analytics
+- **Semantic Search**: FAISS-based vector similarity search using SentenceTransformers embeddings
+- **Hybrid Search**: Combines keyword and semantic search for improved relevance
+- **Query Enhancement**: Spell correction, synonym expansion, query classification, and normalization
+- **Recommendations**: 
+  - Popularity-based recommendations
+  - Collaborative filtering with Implicit ALS for personalized recommendations
+- **Ranking**: Deterministic ranking formula combining search scores, popularity, freshness, and collaborative filtering
+- **Event Tracking**: Track user interactions (views, clicks, purchases) for analytics and feature computation
 
 ### Authentication
 - Email/password sign up and login
@@ -166,10 +221,21 @@ npm run frontend
 - FastAPI with automatic API documentation
 - CORS configured for development
 - Health check endpoint
-- Search endpoint: `GET /search?q={query}&k={limit}`
-- Recommendations endpoint: `GET /recommend/{user_id}?k={limit}`
+- Search endpoint: `GET /search?q={query}&user_id={optional}&k={limit}` (supports hybrid search)
+- Recommendations endpoint: `GET /recommend/{user_id}?k={limit}` (includes collaborative filtering)
 - Event tracking endpoint: `POST /events`
+- Metrics endpoint: `GET /metrics` (Prometheus format)
 - Feature computation (popularity scores, freshness scores)
+- Batch jobs for FAISS index building and CF model training
+
+### Observability
+- **Structured Logging**: JSON-formatted logs with trace ID propagation for request correlation
+- **Metrics**: Prometheus metrics (RED metrics, business metrics, resource metrics)
+- **Distributed Tracing**: OpenTelemetry integration with Jaeger for trace visualization
+- **Alerting**: Prometheus Alertmanager with runbooks for common issues
+- **Dashboards**: Grafana dashboards for service health, search/recommendation performance, database health, and cache performance
+
+See [docs/how to run.md](docs/how%20to%20run.md#monitoring-with-prometheus--grafana) for monitoring setup.
 
 ## API Endpoints
 
@@ -300,6 +366,20 @@ cd backend
 pytest tests/
 ```
 
+Run specific test suites:
+```bash
+# Test logging and trace propagation
+pytest tests/test_logging.py tests/test_trace_propagation.py -v
+
+# Test tracing integration
+pytest tests/test_tracing.py tests/test_tracing_integration.py -v
+
+# Test search and recommendations
+pytest tests/test_search.py tests/test_recommend.py -v
+```
+
+See [docs/how to run.md](docs/how%20to%20run.md#testing-the-system) for comprehensive testing instructions.
+
 ## Troubleshooting
 
 ### Backend Issues
@@ -322,10 +402,42 @@ pytest tests/
 - **No data**: Run seed script: `python backend/scripts/seed_data.py`
 - **Popularity scores are zero**: Run feature computation: `python -m app.services.features.compute`
 
+### Advanced Features
+- **Semantic search not working**: See [docs/how to run.md](docs/how%20to%20run.md#8-build-faiss-index-for-semantic-search-optional)
+- **Collaborative filtering not working**: See [docs/how to run.md](docs/how%20to%20run.md#9-train-collaborative-filtering-model-optional---phase-32)
+- **Query enhancement not working**: See [docs/how to run.md](docs/how%20to%20run.md#10-test-query-enhancement-phase-22)
+- **Tracing not appearing**: See [docs/how to run.md](docs/how%20to%20run.md#10-test-distributed-tracing-phase-13)
+
+For comprehensive troubleshooting, see [docs/how to run.md](docs/how%20to%20run.md#troubleshooting).
+
 ## License
 
 MIT
 
+## Architecture & Design
+
+The system follows a **separation of concerns** architecture where retrieval, ranking, and serving are independent components. Key design principles:
+
+- **Retrieval is separate from ranking**: Search/recommendation services return candidates, ranking service orders them
+- **Offline training, online serving**: Features are computed offline, models are trained separately
+- **Fail gracefully**: Every component has fallback mechanisms
+- **Local-first development**: Same code runs on laptop and cloud
+
+For detailed architecture documentation, see:
+- [System Overview](specs/SYSTEM_OVERVIEW.md)
+- [Architecture](specs/ARCHITECTURE.md)
+- [Search Design](specs/SEARCH_DESIGN.md)
+- [Recommendation Design](specs/RECOMMENDATION_DESIGN.md)
+- [Ranking Logic](specs/RANKING_LOGIC.md)
+
+## Documentation
+
+- **[How to Run](docs/how%20to%20run.md)** - Complete setup, testing, and troubleshooting guide
+- **[How It Works](docs/how%20it%20works.md)** - Detailed system architecture, algorithms, and implementation details
+- **[Implementation Plan](docs/implementation_plan.md)** - Phased roadmap with current status
+- **[Specifications](specs/)** - Architecture, API contracts, feature definitions, and design documents
+- **[Runbooks](docs/runbooks/)** - Operational guides for common issues
+
 ## Contributing
 
-This is a starter template. Feel free to fork and customize for your needs!
+This is a production-grade search and recommendation system. Contributions should follow the specifications in the `/specs` directory and maintain separation of concerns between retrieval, ranking, and serving components.
