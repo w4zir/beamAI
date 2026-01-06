@@ -7,15 +7,19 @@ observability specification in /specs/OBSERVABILITY.md.
 Features:
 - Automatic trace ID generation and propagation
 - Span creation for key operations (search, ranking, database, cache)
-- Trace export to Jaeger backend
+- Trace export via OTLP (OpenTelemetry Protocol) - recommended
+- Legacy Jaeger exporter support (if package is manually installed)
 - Integration with structured logging (trace_id in logs)
 - Trace context propagation via HTTP headers
 
 Configuration:
 - OTEL_SERVICE_NAME: Service name (default: beamai_search_api)
-- OTEL_EXPORTER_JAEGER_ENDPOINT: Jaeger endpoint (default: http://localhost:14268/api/traces)
+- OTEL_EXPORTER_OTLP_ENDPOINT: OTLP endpoint (recommended, e.g., http://localhost:4317 for gRPC or http://localhost:4318 for HTTP)
+- OTEL_EXPORTER_JAEGER_ENDPOINT: Jaeger endpoint (deprecated, use OTLP instead)
 - OTEL_TRACES_SAMPLER_ARG: Sampling rate (default: 1.0 for 100% sampling)
-- OTEL_EXPORTER_OTLP_ENDPOINT: OTLP endpoint (alternative to Jaeger)
+
+Note: Jaeger exporter package has been removed from requirements due to dependency conflicts.
+Use OTLP exporter instead - Jaeger can receive traces via OTLP endpoint.
 """
 import os
 from typing import Optional, Dict, Any
@@ -25,8 +29,15 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.exporter.jaeger.thrift import JaegerExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
+# Jaeger exporter is deprecated - use OTLP exporter instead
+# OTLP can send traces to Jaeger via OTLP endpoint
+try:
+    from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+    JAEGER_AVAILABLE = True
+except ImportError:
+    JAEGER_AVAILABLE = False
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.trace import Status, StatusCode, Tracer
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
@@ -89,51 +100,60 @@ def configure_tracing(
         _tracer_provider = TracerProvider(resource=resource, sampler=sampler)
     
     # Add Jaeger exporter if enabled
+    # Note: Jaeger exporter package is deprecated and removed from requirements.
+    # Use OTLP exporter instead (configure via OTEL_EXPORTER_OTLP_ENDPOINT).
+    # Jaeger can receive traces via OTLP endpoint (typically port 4317 for gRPC or 4318 for HTTP).
     if enable_jaeger and jaeger_endpoint:
-        try:
-            # Parse endpoint URL
-            # Format: http://host:port/api/traces or http://host:port
-            if "://" in jaeger_endpoint:
-                # Extract host and port from URL
-                url_parts = jaeger_endpoint.split("://")[1]
-                if "/" in url_parts:
-                    host_port = url_parts.split("/")[0]
+        if JAEGER_AVAILABLE:
+            try:
+                # Legacy Jaeger exporter (deprecated, only if package is manually installed)
+                # Parse endpoint URL
+                # Format: http://host:port/api/traces or http://host:port
+                if "://" in jaeger_endpoint:
+                    # Extract host and port from URL
+                    url_parts = jaeger_endpoint.split("://")[1]
+                    if "/" in url_parts:
+                        host_port = url_parts.split("/")[0]
+                    else:
+                        host_port = url_parts
+                    
+                    if ":" in host_port:
+                        host, port_str = host_port.split(":")
+                        port = int(port_str)
+                    else:
+                        host = host_port
+                        port = 14268  # Default Jaeger port
                 else:
-                    host_port = url_parts
+                    host = "localhost"
+                    port = 14268
                 
-                if ":" in host_port:
-                    host, port_str = host_port.split(":")
-                    port = int(port_str)
-                else:
-                    host = host_port
-                    port = 14268  # Default Jaeger port
-            else:
-                host = "localhost"
-                port = 14268
-            
-            # JaegerExporter uses agent_host_name and agent_port for UDP
-            # For HTTP endpoint, we need to use the endpoint parameter
-            # Note: JaegerExporter may not support HTTP endpoint directly
-            # We'll use agent_host_name and agent_port for UDP, or configure HTTP separately
-            jaeger_exporter = JaegerExporter(
-                agent_host_name=host,
-                agent_port=port,
-            )
-            span_processor = BatchSpanProcessor(jaeger_exporter)
-            _tracer_provider.add_span_processor(span_processor)
-            logger.info(
-                "tracing_jaeger_configured",
-                host=host,
-                port=port,
-                sampling_rate=sampling_rate,
-            )
-        except Exception as e:
+                # JaegerExporter uses agent_host_name and agent_port for UDP
+                jaeger_exporter = JaegerExporter(
+                    agent_host_name=host,
+                    agent_port=port,
+                )
+                span_processor = BatchSpanProcessor(jaeger_exporter)
+                _tracer_provider.add_span_processor(span_processor)
+                logger.info(
+                    "tracing_jaeger_configured",
+                    host=host,
+                    port=port,
+                    sampling_rate=sampling_rate,
+                )
+            except Exception as e:
+                logger.warning(
+                    "tracing_jaeger_configuration_failed",
+                    endpoint=jaeger_endpoint,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    message="Tracing will continue without Jaeger export",
+                )
+        else:
+            # Jaeger exporter package not available - recommend using OTLP instead
             logger.warning(
-                "tracing_jaeger_configuration_failed",
+                "tracing_jaeger_exporter_unavailable",
                 endpoint=jaeger_endpoint,
-                error=str(e),
-                error_type=type(e).__name__,
-                message="Tracing will continue without Jaeger export",
+                message="Jaeger exporter package is not installed. Use OTLP exporter instead by setting OTEL_EXPORTER_OTLP_ENDPOINT. Jaeger can receive traces via OTLP (port 4317 for gRPC or 4318 for HTTP).",
             )
     
     # Add OTLP exporter if enabled
