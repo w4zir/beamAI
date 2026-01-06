@@ -123,8 +123,8 @@ class QueryEnhancementService:
         """
         start_time = time.time()
         
-        # Initialize result
-        enhanced = EnhancedQuery(original_query=query)
+        # Initialize result with temporary normalized_query (will be set properly below)
+        enhanced = EnhancedQuery(original_query=query, normalized_query="")
         
         if not query or not query.strip():
             enhanced.normalized_query = ""

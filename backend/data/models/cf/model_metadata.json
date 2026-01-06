@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "training_date": "2026-01-04T23:30:51.370291Z",
+  "training_date": "2026-01-06T08:37:59.508976+00:00",
   "model_type": "ImplicitALS",
   "parameters": {
     "factors": 50,
@@ -11,7 +11,7 @@
   "training_metrics": {
     "num_users": 12,
     "num_products": 21,
-    "num_interactions": 94,
-    "sparsity": 0.626984126984127
+    "num_interactions": 93,
+    "sparsity": 0.6309523809523809
   }
 }

@@ -12,7 +12,7 @@ import sys
 import json
 import time
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Tuple, Optional
 
 import numpy as np
@@ -39,6 +39,7 @@ from app.services.recommendation.collaborative import (
     DEFAULT_ITERATIONS,
     DEFAULT_ALPHA,
 )
+from typing import Tuple
 
 # Configure logging
 configure_logging(log_level="INFO", json_output=False)
@@ -182,7 +183,7 @@ def save_model_artifacts(
         # Create metadata
         metadata = {
             "version": MODEL_VERSION,
-            "training_date": datetime.utcnow().isoformat() + "Z",
+            "training_date": datetime.now(timezone.utc).isoformat(),
             "model_type": "ImplicitALS",
             "parameters": {
                 "factors": factors,
@@ -295,6 +296,7 @@ def main(
     min_matrix_users: int = 10,
     min_matrix_products: int = 10,
     min_matrix_interactions: int = 100,
+    strict_validation: bool = False,
 ):
     """
     Main function to train CF model.
@@ -309,6 +311,8 @@ def main(
         min_matrix_users: Minimum number of users required for matrix validation
         min_matrix_products: Minimum number of products required for matrix validation
         min_matrix_interactions: Minimum number of interactions required for matrix validation
+        strict_validation: If True, fail when below threshold. If False, allow training with warning
+                          if within 10% of threshold (default: False for development flexibility)
     """
     logger.info("cf_training_pipeline_started")
     
@@ -330,14 +334,34 @@ def main(
     matrix, user_id_to_index, product_id_to_index = build_interaction_matrix(interactions)
     
     # Validate matrix
-    if not validate_interaction_matrix(
+    is_valid, warning_message = validate_interaction_matrix(
         matrix,
         min_users=min_matrix_users,
         min_products=min_matrix_products,
         min_interactions=min_matrix_interactions,
-    ):
+        strict=strict_validation,
+    )
+    
+    if not is_valid:
         logger.error("cf_training_matrix_validation_failed")
+        logger.error(
+            "cf_validation_details",
+            num_users=matrix.shape[0],
+            num_products=matrix.shape[1],
+            num_interactions=matrix.nnz,
+            min_users=min_matrix_users,
+            min_products=min_matrix_products,
+            min_interactions=min_matrix_interactions,
+            suggestion=(
+                "Consider: 1) Using --strict-validation=false to allow training with warnings, "
+                "2) Lowering thresholds with --min-matrix-* flags, "
+                "3) Collecting more interaction data"
+            ),
+        )
         sys.exit(1)
+    
+    if warning_message:
+        logger.warning("cf_training_proceeding_with_warning", message=warning_message)
     
     # Train model
     logger.info("cf_training_model")
@@ -392,25 +416,25 @@ if __name__ == "__main__":
         "--factors",
         type=int,
         default=DEFAULT_FACTORS,
-        help=f"Number of latent factors (default: {DEFAULT_FACTORS})",
+        help="Number of latent factors (default: %(default)s)",
     )
     parser.add_argument(
         "--regularization",
         type=float,
         default=DEFAULT_REGULARIZATION,
-        help=f"L2 regularization parameter (default: {DEFAULT_REGULARIZATION})",
+        help="L2 regularization parameter (default: %(default)s)",
     )
     parser.add_argument(
         "--iterations",
         type=int,
         default=DEFAULT_ITERATIONS,
-        help=f"Number of ALS iterations (default: {DEFAULT_ITERATIONS})",
+        help="Number of ALS iterations (default: %(default)s)",
     )
     parser.add_argument(
         "--alpha",
         type=float,
         default=DEFAULT_ALPHA,
-        help=f"Confidence scaling for implicit feedback (default: {DEFAULT_ALPHA})",
+        help="Confidence scaling for implicit feedback (default: %(default)s)",
     )
     parser.add_argument(
         "--min-interactions",
@@ -436,6 +460,11 @@ if __name__ == "__main__":
         default=100,
         help="Minimum number of interactions required for matrix validation (default: 100)",
     )
+    parser.add_argument(
+        "--strict-validation",
+        action="store_true",
+        help="Use strict validation (fail if below threshold). By default, allows training with warnings if within 10%% of threshold",
+    )
     
     args = parser.parse_args()
     
@@ -451,5 +480,6 @@ if __name__ == "__main__":
         min_matrix_users=args.min_matrix_users,
         min_matrix_products=args.min_matrix_products,
         min_matrix_interactions=args.min_matrix_interactions,
+        strict_validation=args.strict_validation,
     )
 

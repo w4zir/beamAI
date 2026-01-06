@@ -137,13 +137,14 @@ class QueryClassificationService:
         if self._has_purchase_intent(query_lower, query_words):
             return QUERY_TYPE_TRANSACTIONAL
         
+        # Check for informational intent (question words) BEFORE navigational
+        # This ensures questions are classified as informational, not navigational
+        if self._has_informational_intent(query_lower, query_words):
+            return QUERY_TYPE_INFORMATIONAL
+        
         # Check for navigational intent (brand + model pattern)
         if self._has_navigational_intent(query_lower, query_words):
             return QUERY_TYPE_NAVIGATIONAL
-        
-        # Check for informational intent (question words)
-        if self._has_informational_intent(query_lower, query_words):
-            return QUERY_TYPE_INFORMATIONAL
         
         # Default to informational
         return QUERY_TYPE_INFORMATIONAL
@@ -186,15 +187,28 @@ class QueryClassificationService:
                 if word_count <= 4:
                     return True
         
+        # Only check for brand-like patterns if we have brands loaded
+        # This prevents generic queries from being misclassified as navigational
+        if not self.brands:
+            return False
+        
         # Check for brand-like patterns (capitalized words at start)
         # Pattern: "Brand Model" or "Brand Product"
+        # Only match if the first word could be a brand (short, alphanumeric, not a common word)
         words = query_lower.split()
         if len(words) >= 2:
-            # Check if first word looks like a brand (common brand patterns)
             first_word = words[0]
-            # If it's a short word (typical brand length), might be navigational
-            if len(first_word) <= 10 and first_word.isalpha():
-                # Check if second word is also short (model/product name)
+            # Common words that shouldn't be treated as brands
+            common_words = {"what", "how", "why", "when", "where", "which", "best", "top", 
+                          "good", "cheap", "buy", "random", "search", "find", "get", "a", "an", "the"}
+            
+            # Only consider navigational if:
+            # 1. First word is not a common word
+            # 2. First word is short (typical brand length)
+            # 3. Query is short (2-3 words, typical for brand+model)
+            if (first_word not in common_words and 
+                len(first_word) <= 10 and first_word.isalpha() and
+                len(words) <= 3):
                 second_word = words[1] if len(words) > 1 else ""
                 if second_word and len(second_word) <= 15:
                     # Likely navigational: "brand model" pattern

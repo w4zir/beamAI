@@ -13,7 +13,7 @@ from unittest.mock import patch, Mock
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.search.query_enhancement import get_query_enhancement_service, EnhancedQuery
+from app.services.search.query_enhancement import get_query_enhancement_service, EnhancedQuery, QueryEnhancementService
 from app.core.metrics import (
     query_enhancement_requests_total,
     query_spell_correction_total,
@@ -30,10 +30,7 @@ def test_query_enhancement_pipeline():
     service = get_query_enhancement_service()
     
     # Mock database and services for initialization
-    with patch('app.services.search.normalization.get_supabase_client'), \
-         patch('app.services.search.spell_correction.get_supabase_client') as mock_spell_db, \
-         patch('app.services.search.query_classification.get_supabase_client') as mock_class_db, \
-         patch('app.services.search.intent_extraction.get_supabase_client') as mock_intent_db:
+    with patch('app.core.database.get_supabase_client') as mock_db:
         
         # Setup mock database responses
         mock_response = Mock()
@@ -41,9 +38,7 @@ def test_query_enhancement_pipeline():
             {"name": "Nike Running Shoes", "category": "sports"},
             {"name": "Apple Laptop", "category": "electronics"},
         ]
-        mock_spell_db.return_value.table.return_value.select.return_value.execute.return_value = mock_response
-        mock_class_db.return_value.table.return_value.select.return_value.execute.return_value = mock_response
-        mock_intent_db.return_value.table.return_value.select.return_value.execute.return_value = mock_response
+        mock_db.return_value.table.return_value.select.return_value.execute.return_value = mock_response
         
         # Test enhancement
         enhanced = service.enhance("nike runnig shoes")
@@ -58,10 +53,7 @@ def test_query_enhancement_with_spell_correction():
     """Test query enhancement with spell correction."""
     service = get_query_enhancement_service()
     
-    with patch('app.services.search.normalization.get_supabase_client'), \
-         patch('app.services.search.spell_correction.get_supabase_client') as mock_db, \
-         patch('app.services.search.query_classification.get_supabase_client'), \
-         patch('app.services.search.intent_extraction.get_supabase_client'):
+    with patch('app.core.database.get_supabase_client') as mock_db:
         
         mock_response = Mock()
         mock_response.data = [
@@ -85,10 +77,7 @@ def test_query_enhancement_with_synonym_expansion():
     """Test query enhancement with synonym expansion."""
     service = get_query_enhancement_service()
     
-    with patch('app.services.search.normalization.get_supabase_client'), \
-         patch('app.services.search.spell_correction.get_supabase_client'), \
-         patch('app.services.search.query_classification.get_supabase_client'), \
-         patch('app.services.search.intent_extraction.get_supabase_client'):
+    with patch('app.core.database.get_supabase_client'):
         
         # Initialize synonym expansion
         from app.services.search.synonym_expansion import get_synonym_expansion_service
@@ -138,26 +127,14 @@ def test_search_endpoint_with_query_enhancement_enabled():
     
     try:
         # Mock database for search and enhancement services
-        with patch('app.services.search.keyword.get_supabase_client') as mock_search_db, \
-             patch('app.services.search.normalization.get_supabase_client'), \
-             patch('app.services.search.spell_correction.get_supabase_client') as mock_spell_db, \
-             patch('app.services.search.query_classification.get_supabase_client') as mock_class_db, \
-             patch('app.services.search.intent_extraction.get_supabase_client') as mock_intent_db:
-            
+        with patch('app.core.database.get_supabase_client') as mock_db:
             # Setup mock database responses
-            mock_search_response = Mock()
-            mock_search_response.data = [
+            mock_response = Mock()
+            mock_response.data = [
                 {"id": "prod_1", "name": "Running Shoes", "description": "Comfortable running shoes", "category": "sports", "search_vector": None},
-            ]
-            mock_search_db.return_value.table.return_value.select.return_value.execute.return_value = mock_search_response
-            
-            mock_enhancement_response = Mock()
-            mock_enhancement_response.data = [
                 {"name": "Running Shoes", "category": "sports"},
             ]
-            mock_spell_db.return_value.table.return_value.select.return_value.execute.return_value = mock_enhancement_response
-            mock_class_db.return_value.table.return_value.select.return_value.execute.return_value = mock_enhancement_response
-            mock_intent_db.return_value.table.return_value.select.return_value.execute.return_value = mock_enhancement_response
+            mock_db.return_value.table.return_value.select.return_value.execute.return_value = mock_response
             
             response = client.get("/search?q=running shoes&k=5")
             
@@ -239,11 +216,7 @@ def test_query_enhancement_latency():
     """Test that query enhancement latency is measured."""
     service = get_query_enhancement_service()
     
-    with patch('app.services.search.normalization.get_supabase_client'), \
-         patch('app.services.search.spell_correction.get_supabase_client'), \
-         patch('app.services.search.query_classification.get_supabase_client'), \
-         patch('app.services.search.intent_extraction.get_supabase_client'):
-        
+    with patch('app.core.database.get_supabase_client'):
         enhanced = service.enhance("test query")
         
         # Should have latency measurement

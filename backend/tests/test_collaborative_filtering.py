@@ -158,13 +158,16 @@ class TestDataExtraction:
     def test_validate_interaction_matrix_valid(self, sample_matrix_and_mappings):
         """Test validating valid interaction matrix."""
         matrix, _, _ = sample_matrix_and_mappings
-        assert validate_interaction_matrix(matrix, min_users=1, min_products=1, min_interactions=1)
+        is_valid, warning = validate_interaction_matrix(matrix, min_users=1, min_products=1, min_interactions=1)
+        assert is_valid
+        assert warning is None
     
     def test_validate_interaction_matrix_invalid(self):
         """Test validating invalid interaction matrix."""
         from scipy.sparse import csr_matrix
         empty_matrix = csr_matrix((0, 0))
-        assert not validate_interaction_matrix(empty_matrix, min_users=1, min_products=1, min_interactions=1)
+        is_valid, warning = validate_interaction_matrix(empty_matrix, min_users=1, min_products=1, min_interactions=1)
+        assert not is_valid
 
 
 class TestCollaborativeFilteringService:
