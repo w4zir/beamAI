@@ -194,8 +194,9 @@ def validate_interaction_matrix(
     matrix: csr_matrix,
     min_users: int = 10,
     min_products: int = 10,
-    min_interactions: int = 100
-) -> bool:
+    min_interactions: int = 100,
+    strict: bool = True
+) -> Tuple[bool, Optional[str]]:
     """
     Validate interaction matrix meets minimum requirements.
     
@@ -204,39 +205,84 @@ def validate_interaction_matrix(
         min_users: Minimum number of users required
         min_products: Minimum number of products required
         min_interactions: Minimum number of interactions required
+        strict: If True, fail validation when below threshold. If False, allow training
+                with warning if within 10% of threshold.
         
     Returns:
-        True if matrix is valid, False otherwise
+        Tuple of (is_valid, warning_message). warning_message is None if no warning.
     """
+    # Check users
     if matrix.shape[0] < min_users:
+        threshold_90 = int(min_users * 0.9)
+        if not strict and matrix.shape[0] >= threshold_90:
+            warning = (
+                f"Number of users ({matrix.shape[0]}) is below recommended minimum "
+                f"({min_users}) but within acceptable range. Training will proceed with warning."
+            )
+            logger.warning(
+                "cf_matrix_validation_warning",
+                reason="insufficient_users",
+                num_users=matrix.shape[0],
+                min_users=min_users,
+            )
+            return True, warning
         logger.warning(
             "cf_matrix_validation_failed",
             reason="insufficient_users",
             num_users=matrix.shape[0],
             min_users=min_users,
         )
-        return False
+        return False, None
     
+    # Check products
     if matrix.shape[1] < min_products:
+        threshold_90 = int(min_products * 0.9)
+        if not strict and matrix.shape[1] >= threshold_90:
+            warning = (
+                f"Number of products ({matrix.shape[1]}) is below recommended minimum "
+                f"({min_products}) but within acceptable range. Training will proceed with warning."
+            )
+            logger.warning(
+                "cf_matrix_validation_warning",
+                reason="insufficient_products",
+                num_products=matrix.shape[1],
+                min_products=min_products,
+            )
+            return True, warning
         logger.warning(
             "cf_matrix_validation_failed",
             reason="insufficient_products",
             num_products=matrix.shape[1],
             min_products=min_products,
         )
-        return False
+        return False, None
     
+    # Check interactions
     if matrix.nnz < min_interactions:
+        threshold_90 = int(min_interactions * 0.9)
+        if not strict and matrix.nnz >= threshold_90:
+            warning = (
+                f"Number of interactions ({matrix.nnz}) is below recommended minimum "
+                f"({min_interactions}) but within acceptable range. Training will proceed with warning. "
+                f"Model quality may be reduced."
+            )
+            logger.warning(
+                "cf_matrix_validation_warning",
+                reason="insufficient_interactions",
+                num_interactions=matrix.nnz,
+                min_interactions=min_interactions,
+            )
+            return True, warning
         logger.warning(
             "cf_matrix_validation_failed",
             reason="insufficient_interactions",
             num_interactions=matrix.nnz,
             min_interactions=min_interactions,
         )
-        return False
+        return False, None
     
     logger.info("cf_matrix_validation_passed")
-    return True
+    return True, None
 
 
 class CollaborativeFilteringService:

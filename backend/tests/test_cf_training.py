@@ -78,40 +78,65 @@ class TestTrainingPipeline:
     
     def test_validate_matrix_valid(self, sample_matrix):
         """Test validating valid matrix."""
-        assert validate_interaction_matrix(
+        is_valid, warning = validate_interaction_matrix(
             sample_matrix,
             min_users=1,
             min_products=1,
             min_interactions=1,
         )
+        assert is_valid
+        assert warning is None
     
     def test_validate_matrix_insufficient_users(self):
         """Test validating matrix with insufficient users."""
         matrix = csr_matrix((1, 10))  # 1 user, 10 products
-        assert not validate_interaction_matrix(
+        is_valid, warning = validate_interaction_matrix(
             matrix,
             min_users=10,
             min_products=1,
             min_interactions=1,
         )
+        assert not is_valid
     
     def test_validate_matrix_insufficient_products(self):
         """Test validating matrix with insufficient products."""
         matrix = csr_matrix((10, 1))  # 10 users, 1 product
-        assert not validate_interaction_matrix(
+        is_valid, warning = validate_interaction_matrix(
             matrix,
             min_users=1,
             min_products=10,
             min_interactions=1,
         )
+        assert not is_valid
     
     def test_validate_matrix_insufficient_interactions(self):
         """Test validating matrix with insufficient interactions."""
         matrix = csr_matrix((10, 10))
-        assert not validate_interaction_matrix(
+        is_valid, warning = validate_interaction_matrix(
             matrix,
             min_users=1,
             min_products=1,
             min_interactions=100,
         )
+        assert not is_valid
+    
+    def test_validate_matrix_warning_mode(self):
+        """Test validating matrix with warning mode (non-strict)."""
+        # Create matrix with 93 interactions (below 100 but above 90)
+        import numpy as np
+        rows = np.random.randint(0, 12, 93)
+        cols = np.random.randint(0, 21, 93)
+        data = np.ones(93)
+        matrix = csr_matrix((data, (rows, cols)), shape=(12, 21))
+        
+        is_valid, warning = validate_interaction_matrix(
+            matrix,
+            min_users=10,
+            min_products=10,
+            min_interactions=100,
+            strict=False,
+        )
+        assert is_valid
+        assert warning is not None
+        assert "within acceptable range" in warning.lower()
 
