@@ -384,6 +384,7 @@ def initialize_rate_limit_middleware(app) -> RateLimitMiddleware:
     redis_client = get_redis_client()
     _rate_limit_middleware = RateLimitMiddleware(app, redis_client=redis_client)
     # Add middleware to app (will be updated with Redis client in startup)
-    app.add_middleware(RateLimitMiddleware, app=app, redis_client=redis_client)
+    # Note: Starlette automatically passes 'app' as first positional argument
+    app.add_middleware(RateLimitMiddleware, redis_client=redis_client)
     return _rate_limit_middleware
 

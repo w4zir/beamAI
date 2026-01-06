@@ -338,15 +338,72 @@ npm run frontend
 
 Frontend runs on: http://localhost:5173
 
-### Option 3: Run with Docker Compose
+### Option 3: Run with Docker Compose (Recommended)
+
+Run all services (PostgreSQL, Redis, Backend, Frontend, Prometheus, Grafana, Alertmanager, Jaeger) using Docker Compose:
 
 ```bash
+# Start all services
 docker-compose up
+
+# Or run in detached mode (background)
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# View logs for a specific service
+docker-compose logs -f backend
+docker-compose logs -f frontend
+docker-compose logs -f prometheus
+docker-compose logs -f grafana
+
+# Stop all services
+docker-compose down
+
+# Stop and remove volumes (clean slate)
+docker-compose down -v
 ```
 
-This starts all services (PostgreSQL, Redis, Backend, Frontend, Prometheus, Grafana) in containers.
+**Services and Ports:**
+- **Backend API**: http://localhost:8000 (API docs: http://localhost:8000/docs)
+- **Frontend**: http://localhost:5173
+- **PostgreSQL**: localhost:54325
+- **Redis**: localhost:6379
+- **Prometheus**: http://localhost:9090
+- **Grafana**: http://localhost:3000 (admin/admin)
+- **Alertmanager**: http://localhost:9093
+- **Jaeger UI**: http://localhost:16686
 
-**Note:** Prometheus and Grafana are included in the Docker Compose setup for monitoring. See [Monitoring with Prometheus & Grafana](#monitoring-with-prometheus--grafana) section for details.
+**Environment Variables:**
+Create a `.env` file in the project root (optional - defaults are provided):
+```bash
+# Supabase Configuration (optional - for external Supabase)
+SUPABASE_URL=http://localhost:54321
+SUPABASE_SERVICE_KEY=your_service_role_key
+
+# Logging Configuration
+LOG_LEVEL=INFO
+LOG_JSON=true
+
+# OpenTelemetry Tracing
+OTEL_TRACES_SAMPLER_ARG=1.0
+
+# Feature Flags
+ENABLE_SEMANTIC_SEARCH=false
+ENABLE_QUERY_ENHANCEMENT=false
+```
+
+**Service Dependencies:**
+- Backend depends on: PostgreSQL, Redis, Jaeger
+- Frontend depends on: Backend
+- Prometheus depends on: Backend
+- Grafana depends on: Prometheus
+- Alertmanager depends on: Prometheus
+
+All services are configured with health checks and will wait for dependencies to be healthy before starting.
+
+**Note:** Prometheus, Grafana, Alertmanager, and Jaeger are included in the Docker Compose setup for monitoring and observability. See [Monitoring with Prometheus & Grafana](#monitoring-with-prometheus--grafana) section for details.
 
 ---
 

@@ -11,9 +11,9 @@ import os
 import json
 import hashlib
 from typing import Optional, Any, Dict
-import aioredis
-from aioredis import Redis
-from aioredis.exceptions import RedisError, ConnectionError as RedisConnectionError
+import redis.asyncio as redis
+from redis.asyncio import Redis
+from redis.exceptions import RedisError, ConnectionError as RedisConnectionError
 from app.core.logging import get_logger
 from app.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 
@@ -43,7 +43,7 @@ async def initialize_redis() -> bool:
         logger.info("redis_initializing", url=redis_url)
         
         # Create connection pool
-        _redis_pool = await aioredis.from_url(
+        _redis_pool = redis.from_url(
             redis_url,
             max_connections=20,
             socket_connect_timeout=5,
@@ -84,8 +84,7 @@ async def close_redis() -> None:
     
     if _redis_pool:
         try:
-            await _redis_pool.close()
-            await _redis_pool.connection_pool.disconnect()
+            await _redis_pool.aclose()
             logger.info("redis_closed")
         except Exception as e:
             logger.error(

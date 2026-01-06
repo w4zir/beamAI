@@ -119,8 +119,6 @@ groups:
           description: |
             Available database connections are less than 2.
             
-            Total connections: {{ db_connection_pool_size{state="total"} }}
-            Active connections: {{ db_connection_pool_size{state="active"} }}
             Available connections: {{ $value }}
             
             This may cause request failures and service degradation.
