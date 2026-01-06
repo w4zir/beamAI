@@ -6,6 +6,15 @@ from fastapi.responses import JSONResponse
 from .core.logging import configure_logging, get_logger, get_trace_id
 from .core.middleware import TraceIDMiddleware
 from .core.metrics import record_http_request
+from .core.tracing import (
+    configure_tracing,
+    instrument_fastapi,
+    shutdown_tracing,
+    get_trace_id_from_context,
+    record_exception,
+    set_span_status,
+    StatusCode,
+)
 from .routes import health, search, recommend, events, metrics
 from .services.search.semantic import initialize_semantic_search
 from .services.recommendation.collaborative import initialize_collaborative_filtering
@@ -17,6 +26,12 @@ json_output = os.getenv("LOG_JSON", "true").lower() == "true"
 configure_logging(log_level=log_level, json_output=json_output)
 
 logger = get_logger(__name__)
+
+# Configure distributed tracing
+# Enable Jaeger by default, can be disabled via OTEL_EXPORTER_JAEGER_ENDPOINT=""
+enable_jaeger = os.getenv("OTEL_EXPORTER_JAEGER_ENDPOINT", "").lower() != "disabled"
+enable_otlp = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").lower() != ""
+configure_tracing(enable_jaeger=enable_jaeger, enable_otlp=enable_otlp)
 
 app = FastAPI(
     title="BeamAI Search & Recommendation API",
@@ -35,6 +50,9 @@ app.add_middleware(
 
 # Add trace ID middleware (must be after CORS middleware)
 app.add_middleware(TraceIDMiddleware)
+
+# Instrument FastAPI with OpenTelemetry (creates automatic spans for HTTP requests)
+instrument_fastapi(app)
 
 
 # Startup event: Initialize semantic search
@@ -70,6 +88,15 @@ async def startup_event():
     logger.info("app_startup_completed")
 
 
+# Shutdown event: Cleanup tracing
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup resources on application shutdown."""
+    logger.info("app_shutdown_started")
+    shutdown_tracing()
+    logger.info("app_shutdown_completed")
+
+
 # Error handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -79,7 +106,11 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     start_time = getattr(request.state, "start_time", time.time())
     duration = time.time() - start_time
     
-    trace_id = get_trace_id()
+    # Get trace ID from logging context or OpenTelemetry context
+    trace_id = get_trace_id() or get_trace_id_from_context()
+    
+    # Set span status for HTTP exceptions
+    set_span_status(StatusCode.ERROR if exc.status_code >= 500 else StatusCode.OK, exc.detail)
     
     # Record metrics for HTTP exceptions (4xx errors)
     record_http_request(
@@ -98,7 +129,11 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     )
     response = JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail, "status_code": exc.status_code}
+        content={
+            "detail": exc.detail,
+            "status_code": exc.status_code,
+            "trace_id": trace_id,
+        }
     )
     if trace_id:
         response.headers["X-Trace-ID"] = trace_id
@@ -108,7 +143,13 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle general exceptions."""
-    trace_id = get_trace_id()
+    # Get trace ID from logging context or OpenTelemetry context
+    trace_id = get_trace_id() or get_trace_id_from_context()
+    
+    # Record exception on span
+    record_exception(exc)
+    set_span_status(StatusCode.ERROR, str(exc))
+    
     logger.error(
         "unhandled_exception",
         error=str(exc),
@@ -119,7 +160,11 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
     response = JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error", "status_code": 500}
+        content={
+            "detail": "Internal server error",
+            "status_code": 500,
+            "trace_id": trace_id,
+        }
     )
     if trace_id:
         response.headers["X-Trace-ID"] = trace_id

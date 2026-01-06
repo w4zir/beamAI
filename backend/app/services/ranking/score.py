@@ -17,6 +17,7 @@ cf_score: Uses collaborative filtering scores when available (Phase 3.2), otherw
 """
 from typing import List, Tuple, Dict, Optional
 from app.core.logging import get_logger
+from app.core.tracing import get_tracer, set_span_attribute, record_exception, set_span_status, StatusCode
 from app.services.ranking.features import get_product_features
 from app.services.recommendation.collaborative import get_collaborative_filtering_service
 
@@ -78,132 +79,150 @@ def rank_products(
         List of (product_id, final_score, breakdown) tuples, sorted by final_score descending
         breakdown contains individual feature scores for explainability
     """
-    if not candidates:
+    tracer = get_tracer()
+    with tracer.start_as_current_span("ranking.compute") as span:
+        set_span_attribute("ranking.is_search", is_search)
+        set_span_attribute("ranking.candidates_count", len(candidates))
+        if user_id:
+            set_span_attribute("ranking.user_id", user_id)
+        set_span_attribute("ranking.weights", str(WEIGHTS))
+        
+        if not candidates:
+            logger.info(
+                "ranking_started",
+                is_search=is_search,
+                user_id=user_id,
+                candidates_count=0,
+            )
+            return []
+        
         logger.info(
             "ranking_started",
             is_search=is_search,
             user_id=user_id,
-            candidates_count=0,
-        )
-        return []
-    
-    logger.info(
-        "ranking_started",
-        is_search=is_search,
-        user_id=user_id,
-        candidates_count=len(candidates),
-        weights=WEIGHTS,
-    )
-    
-    # Extract product IDs and search scores
-    product_ids = [product_id for product_id, _ in candidates]
-    search_scores = {product_id: score for product_id, score in candidates}
-    
-    # Get product features
-    features = get_product_features(product_ids)
-    
-    if not features:
-        logger.warning(
-            "ranking_no_features",
-            is_search=is_search,
-            user_id=user_id,
             candidates_count=len(candidates),
+            weights=WEIGHTS,
         )
-        # Fallback: return candidates sorted by search_score
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        return [
-            (product_id, score, {"search_score": score, "cf_score": 0.0, "popularity_score": 0.0, "freshness_score": 0.0})
-            for product_id, score in candidates
-        ]
+        
+        # Extract product IDs and search scores
+        product_ids = [product_id for product_id, _ in candidates]
+        search_scores = {product_id: score for product_id, score in candidates}
+        
+        # Get product features
+        with tracer.start_as_current_span("ranking.features.fetch") as features_span:
+            features = get_product_features(product_ids)
+            set_span_attribute("ranking.features_count", len(features))
     
-    # Get CF scores if user_id provided and CF service available
-    cf_scores: Dict[str, float] = {}
-    cf_service = get_collaborative_filtering_service()
-    if user_id and cf_service and cf_service.is_available():
-        try:
-            cf_scores = cf_service.compute_user_product_affinities(user_id, product_ids)
+        if not features:
+            logger.warning(
+                "ranking_no_features",
+                is_search=is_search,
+                user_id=user_id,
+                candidates_count=len(candidates),
+            )
+            set_span_status(StatusCode.ERROR, "No features available")
+            # Fallback: return candidates sorted by search_score
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            return [
+                (product_id, score, {"search_score": score, "cf_score": 0.0, "popularity_score": 0.0, "freshness_score": 0.0})
+                for product_id, score in candidates
+            ]
+        
+        # Get CF scores if user_id provided and CF service available
+        cf_scores: Dict[str, float] = {}
+        cf_service = get_collaborative_filtering_service()
+        if user_id and cf_service and cf_service.is_available():
+            try:
+                with tracer.start_as_current_span("ranking.cf.compute") as cf_span:
+                    cf_scores = cf_service.compute_user_product_affinities(user_id, product_ids)
+                    set_span_attribute("ranking.cf_scores_count", len(cf_scores))
+                    logger.debug(
+                        "ranking_cf_scores_computed",
+                        user_id=user_id,
+                        products_count=len(cf_scores),
+                    )
+            except Exception as e:
+                record_exception(e)
+                logger.warning(
+                    "ranking_cf_computation_failed",
+                    user_id=user_id,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    message="Falling back to cf_score=0.0",
+                )
+                cf_scores = {}
+        
+        # Compute final scores
+        ranked_results = []
+        
+        for product_id, search_score in candidates:
+            if product_id not in features:
+                logger.warning(
+                    "ranking_product_features_missing",
+                    product_id=product_id,
+                    is_search=is_search,
+                    user_id=user_id,
+                )
+                continue
+            
+            product_features = features[product_id]
+            popularity_score = product_features.get("popularity_score", 0.0)
+            freshness_score = product_features.get("freshness_score", 0.0)
+            
+            # For recommendations, search_score is 0
+            if not is_search:
+                search_score = 0.0
+            
+            # Get CF score (0.0 if not available)
+            cf_score = cf_scores.get(product_id, 0.0)
+            
+            # Compute final score
+            final_score = compute_final_score(
+                search_score=search_score,
+                cf_score=cf_score,
+                popularity_score=popularity_score,
+                freshness_score=freshness_score
+            )
+            
+            # Create breakdown for explainability
+            breakdown = {
+                "search_score": search_score,
+                "cf_score": cf_score,
+                "popularity_score": popularity_score,
+                "freshness_score": freshness_score
+            }
+            
+            # Log ranking for each product
             logger.debug(
-                "ranking_cf_scores_computed",
-                user_id=user_id,
-                products_count=len(cf_scores),
-            )
-        except Exception as e:
-            logger.warning(
-                "ranking_cf_computation_failed",
-                user_id=user_id,
-                error=str(e),
-                error_type=type(e).__name__,
-                message="Falling back to cf_score=0.0",
-            )
-            cf_scores = {}
-    
-    # Compute final scores
-    ranked_results = []
-    
-    for product_id, search_score in candidates:
-        if product_id not in features:
-            logger.warning(
-                "ranking_product_features_missing",
+                "ranking_product_scored",
                 product_id=product_id,
+                final_score=final_score,
+                score_breakdown=breakdown,
+                feature_values={
+                    "popularity_score": popularity_score,
+                    "freshness_score": freshness_score,
+                    "cf_score": cf_score,
+                },
                 is_search=is_search,
                 user_id=user_id,
             )
-            continue
+            
+            ranked_results.append((product_id, final_score, breakdown))
         
-        product_features = features[product_id]
-        popularity_score = product_features.get("popularity_score", 0.0)
-        freshness_score = product_features.get("freshness_score", 0.0)
+        # Sort by final_score descending
+        ranked_results.sort(key=lambda x: x[1], reverse=True)
         
-        # For recommendations, search_score is 0
-        if not is_search:
-            search_score = 0.0
+        # Set span attributes
+        set_span_attribute("ranking.ranked_count", len(ranked_results))
+        set_span_status(StatusCode.OK)
         
-        # Get CF score (0.0 if not available)
-        cf_score = cf_scores.get(product_id, 0.0)
-        
-        # Compute final score
-        final_score = compute_final_score(
-            search_score=search_score,
-            cf_score=cf_score,
-            popularity_score=popularity_score,
-            freshness_score=freshness_score
-        )
-        
-        # Create breakdown for explainability
-        breakdown = {
-            "search_score": search_score,
-            "cf_score": cf_score,
-            "popularity_score": popularity_score,
-            "freshness_score": freshness_score
-        }
-        
-        # Log ranking for each product
-        logger.debug(
-            "ranking_product_scored",
-            product_id=product_id,
-            final_score=final_score,
-            score_breakdown=breakdown,
-            feature_values={
-                "popularity_score": popularity_score,
-                "freshness_score": freshness_score,
-                "cf_score": cf_score,
-            },
+        logger.info(
+            "ranking_completed",
             is_search=is_search,
             user_id=user_id,
+            ranked_count=len(ranked_results),
+            candidates_count=len(candidates),
         )
         
-        ranked_results.append((product_id, final_score, breakdown))
-    
-    # Sort by final_score descending
-    ranked_results.sort(key=lambda x: x[1], reverse=True)
-    
-    logger.info(
-        "ranking_completed",
-        is_search=is_search,
-        user_id=user_id,
-        ranked_count=len(ranked_results),
-        candidates_count=len(candidates),
-    )
-    
-    return ranked_results
+        return ranked_results
 

@@ -17,6 +17,7 @@ import faiss
 from sentence_transformers import SentenceTransformer
 from app.core.logging import get_logger
 from app.core.database import get_supabase_client
+from app.core.tracing import get_tracer, set_span_attribute, record_exception, set_span_status, StatusCode
 from app.core.metrics import (
     semantic_search_requests_total,
     semantic_search_latency_seconds,
@@ -339,103 +340,124 @@ class SemanticSearchService:
             List of (product_id, search_semantic_score) tuples, sorted by score descending
             Returns empty list if search fails or service is not available
         """
-        if not self.is_available():
-            logger.warning(
-                "semantic_search_not_available",
-                query=query,
-                message="Semantic search service not available. Returning empty results.",
-            )
-            return []
-        
-        if not query or not query.strip():
-            logger.warning(
-                "semantic_search_empty_query",
-                message="Empty query provided for semantic search.",
-            )
-            return []
-        
-        try:
-            start_time = time.time()
+        tracer = get_tracer()
+        with tracer.start_as_current_span("search.semantic") as span:
+            set_span_attribute("search.query", query)
+            set_span_attribute("search.top_k", top_k)
+            set_span_attribute("search.type", "semantic")
             
-            # Track request count
-            semantic_search_requests_total.inc()
-            
-            # Generate query embedding
-            query_embedding = self.generate_embedding(query)
-            if query_embedding is None:
+            if not self.is_available():
                 logger.warning(
-                    "semantic_search_embedding_failed",
+                    "semantic_search_not_available",
                     query=query,
-                    message="Failed to generate query embedding. Returning empty results.",
+                    message="Semantic search service not available. Returning empty results.",
                 )
+                set_span_status(StatusCode.ERROR, "Service not available")
                 return []
             
-            # Reshape for FAISS (1 x embedding_dim)
-            query_embedding = query_embedding.reshape(1, -1).astype('float32')
+            if not query or not query.strip():
+                logger.warning(
+                    "semantic_search_empty_query",
+                    message="Empty query provided for semantic search.",
+                )
+                set_span_status(StatusCode.ERROR, "Empty query")
+                return []
             
-            # Search FAISS index
-            search_start = time.time()
-            k = min(top_k, self.index.ntotal)  # Don't search for more than available
-            distances, indices = self.index.search(query_embedding, k)
-            faiss_search_latency_seconds = time.time() - search_start
-            search_latency_ms = int(faiss_search_latency_seconds * 1000)
-            
-            # Track FAISS search latency
-            semantic_faiss_search_latency_seconds.observe(faiss_search_latency_seconds)
-            
-            # Convert distances to similarity scores (cosine similarity)
-            # FAISS L2 distance: smaller distance = higher similarity
-            # Convert to similarity: similarity = 1 / (1 + distance)
-            # Since we normalized embeddings, L2 distance can be converted to cosine similarity
-            # For normalized vectors: cosine_sim = 1 - (distance^2 / 2)
-            results = []
-            for i, (distance, idx) in enumerate(zip(distances[0], indices[0])):
-                if idx == -1:  # FAISS returns -1 for invalid results
-                    continue
+            try:
+                start_time = time.time()
                 
-                # Convert L2 distance to cosine similarity
+                # Track request count
+                semantic_search_requests_total.inc()
+                
+                # Generate query embedding
+                with tracer.start_as_current_span("search.semantic.embedding") as embedding_span:
+                    query_embedding = self.generate_embedding(query)
+                    if query_embedding is None:
+                        logger.warning(
+                            "semantic_search_embedding_failed",
+                            query=query,
+                            message="Failed to generate query embedding. Returning empty results.",
+                        )
+                        set_span_status(StatusCode.ERROR, "Embedding generation failed")
+                        return []
+                
+                # Reshape for FAISS (1 x embedding_dim)
+                query_embedding = query_embedding.reshape(1, -1).astype('float32')
+                
+                # Search FAISS index
+                with tracer.start_as_current_span("search.semantic.faiss") as faiss_span:
+                    search_start = time.time()
+                    k = min(top_k, self.index.ntotal)  # Don't search for more than available
+                    distances, indices = self.index.search(query_embedding, k)
+                    faiss_search_latency_seconds = time.time() - search_start
+                    search_latency_ms = int(faiss_search_latency_seconds * 1000)
+                    
+                    set_span_attribute("search.faiss_latency_ms", search_latency_ms)
+                    set_span_attribute("search.faiss_results_count", len(indices[0]))
+                    
+                    # Track FAISS search latency
+                    semantic_faiss_search_latency_seconds.observe(faiss_search_latency_seconds)
+                
+                # Convert distances to similarity scores (cosine similarity)
+                # FAISS L2 distance: smaller distance = higher similarity
+                # Convert to similarity: similarity = 1 / (1 + distance)
+                # Since we normalized embeddings, L2 distance can be converted to cosine similarity
                 # For normalized vectors: cosine_sim = 1 - (distance^2 / 2)
-                # Clamp to [0, 1] range
-                cosine_similarity = max(0.0, min(1.0, 1.0 - (distance ** 2) / 2.0))
+                results = []
+                for i, (distance, idx) in enumerate(zip(distances[0], indices[0])):
+                    if idx == -1:  # FAISS returns -1 for invalid results
+                        continue
+                    
+                    # Convert L2 distance to cosine similarity
+                    # For normalized vectors: cosine_sim = 1 - (distance^2 / 2)
+                    # Clamp to [0, 1] range
+                    cosine_similarity = max(0.0, min(1.0, 1.0 - (distance ** 2) / 2.0))
+                    
+                    # Get product_id from mapping
+                    product_id = self.product_id_mapping.get(int(idx))
+                    if not product_id:
+                        logger.warning(
+                            "semantic_search_product_id_missing",
+                            index_position=int(idx),
+                            message="Product ID not found in mapping. Skipping result.",
+                        )
+                        continue
+                    
+                    results.append((product_id, float(cosine_similarity)))
                 
-                # Get product_id from mapping
-                product_id = self.product_id_mapping.get(int(idx))
-                if not product_id:
-                    logger.warning(
-                        "semantic_search_product_id_missing",
-                        index_position=int(idx),
-                        message="Product ID not found in mapping. Skipping result.",
-                    )
-                    continue
+                total_latency_seconds = time.time() - start_time
+                total_latency_ms = int(total_latency_seconds * 1000)
                 
-                results.append((product_id, float(cosine_similarity)))
-            
-            total_latency_seconds = time.time() - start_time
-            total_latency_ms = int(total_latency_seconds * 1000)
-            
-            # Track total semantic search latency
-            semantic_search_latency_seconds.observe(total_latency_seconds)
-            
-            logger.info(
-                "semantic_search_completed",
-                query=query,
-                results_count=len(results),
-                top_k=top_k,
-                search_latency_ms=search_latency_ms,
-                total_latency_ms=total_latency_ms,
-            )
-            
-            return results
-            
-        except Exception as e:
-            logger.error(
-                "semantic_search_error",
-                query=query,
-                error=str(e),
-                error_type=type(e).__name__,
-                exc_info=True,
-            )
-            return []
+                # Set span attributes
+                set_span_attribute("search.results_count", len(results))
+                set_span_attribute("search.total_latency_ms", total_latency_ms)
+                set_span_status(StatusCode.OK)
+                
+                # Track total semantic search latency
+                semantic_search_latency_seconds.observe(total_latency_seconds)
+                
+                logger.info(
+                    "semantic_search_completed",
+                    query=query,
+                    results_count=len(results),
+                    top_k=top_k,
+                    search_latency_ms=search_latency_ms,
+                    total_latency_ms=total_latency_ms,
+                )
+                
+                return results
+                
+            except Exception as e:
+                record_exception(e)
+                set_span_status(StatusCode.ERROR, str(e))
+                logger.error(
+                    "semantic_search_error",
+                    query=query,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    exc_info=True,
+                )
+                return []
 
 
 # Global singleton instance

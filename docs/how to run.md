@@ -87,6 +87,12 @@ LOG_JSON=true                     # true for JSON output (production), false for
 
 # Semantic Search Configuration (Phase 3.1)
 ENABLE_SEMANTIC_SEARCH=false      # Set to true to enable hybrid search (requires FAISS index)
+
+# OpenTelemetry Distributed Tracing Configuration (Phase 1.3)
+OTEL_SERVICE_NAME=beamai_search_api              # Service name for traces
+OTEL_EXPORTER_JAEGER_ENDPOINT=http://localhost:14268/api/traces  # Jaeger endpoint (or set to "disabled" to disable)
+OTEL_TRACES_SAMPLER_ARG=1.0                     # Sampling rate (0.0-1.0, 1.0 = 100% sampling)
+OTEL_EXPORTER_OTLP_ENDPOINT=                    # OTLP endpoint (alternative to Jaeger, optional)
 ```
 
 **Structured Logging:**
@@ -227,6 +233,65 @@ python scripts/train_cf_model.py \
 - `--min-matrix-interactions`: Minimum number of interactions required for matrix validation (default: 100)
 
 **Note:** The CF model is automatically loaded on application startup. If the model is not available, the system falls back to `cf_score = 0.0` (no errors thrown). CF scores are only computed when `user_id` is provided in recommendation requests.
+
+### 10. Setup Jaeger for Distributed Tracing (Optional - Phase 1.3)
+
+**Status**: ✅ Distributed tracing with OpenTelemetry is implemented and available.
+
+To visualize distributed traces, set up Jaeger (trace visualization backend):
+
+**Option 1: Run Jaeger with Docker (Recommended)**
+
+```bash
+# Run Jaeger all-in-one container
+docker run -d --name jaeger \
+  -p 16686:16686 \
+  -p 14268:14268 \
+  -p 14250:14250 \
+  jaegertracing/all-in-one:latest
+```
+
+**Option 2: Add Jaeger to Docker Compose**
+
+Add to your `docker-compose.yml`:
+
+```yaml
+  # Jaeger - Distributed Tracing Backend
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: beamai-jaeger
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # HTTP collector
+      - "14250:14250"  # gRPC collector
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - beamai-network
+    restart: unless-stopped
+```
+
+Then start Jaeger:
+
+```bash
+docker-compose up -d jaeger
+```
+
+**Access Jaeger UI:**
+- **URL**: http://localhost:16686
+- **Search Traces**: Use the search interface to find traces by service name, operation, or trace ID
+
+**Configure Backend to Send Traces:**
+
+The backend automatically sends traces to Jaeger if `OTEL_EXPORTER_JAEGER_ENDPOINT` is set (default: `http://localhost:14268/api/traces`).
+
+To disable Jaeger export:
+```bash
+# In .env file
+OTEL_EXPORTER_JAEGER_ENDPOINT=disabled
+```
+
+**Note**: If Jaeger is not running, the backend will log a warning but continue operating normally. Traces will be generated but not exported.
 
 ---
 
@@ -576,7 +641,218 @@ curl "http://localhost:8000/recommend/user_123?k=10"
 
 **Note**: The CF model is automatically loaded on application startup. If the model is not available, the system gracefully falls back to `cf_score = 0.0` without errors. CF scores are only computed when `user_id` is provided in recommendation requests.
 
-### 10. Test Frontend
+### 10. Test Distributed Tracing (Phase 1.3)
+
+**Status**: ✅ Distributed tracing with OpenTelemetry is implemented and available.
+
+**Understanding OpenTelemetry:**
+
+OpenTelemetry is an open-source observability framework that provides:
+- **Traces**: Records of request flows across services (what happened)
+- **Spans**: Individual operations within a trace (timing, attributes, status)
+- **Context Propagation**: Carries trace context across service boundaries via HTTP headers
+
+**How It Works in BeamAI:**
+
+1. **Automatic Instrumentation**: FastAPI is automatically instrumented, creating a root span for every HTTP request
+2. **Manual Spans**: Key operations create child spans:
+   - `search.keyword` - Keyword search operations
+   - `search.semantic` - Semantic search operations
+   - `search.semantic.embedding` - Embedding generation
+   - `search.semantic.faiss` - FAISS index search
+   - `search.hybrid` - Hybrid search merge
+   - `ranking.compute` - Ranking computation
+   - `ranking.features.fetch` - Feature fetching
+   - `ranking.cf.compute` - Collaborative filtering scoring
+   - `features.fetch` - Feature service operations
+   - `database.query` - Database queries
+
+3. **Trace Context**: Trace IDs propagate via HTTP headers (`traceparent`, `X-Trace-ID`)
+4. **Span Attributes**: Each span includes relevant metadata (query, user_id, result counts, etc.)
+5. **Error Tracking**: Exceptions are automatically recorded on spans
+
+**Verify Tracing is Configured:**
+
+Check backend startup logs for tracing configuration:
+
+```bash
+# Look for these log messages:
+# "tracing_configured" - Tracing initialized successfully
+# "tracing_jaeger_configured" - Jaeger exporter configured
+# "tracing_fastapi_instrumented" - FastAPI instrumentation enabled
+```
+
+**Test Trace Generation:**
+
+1. **Make a search request:**
+```bash
+curl "http://localhost:8000/search?q=running%20shoes&k=5"
+```
+
+2. **Check response headers for trace ID:**
+```bash
+curl -v "http://localhost:8000/search?q=test&k=5" 2>&1 | grep -i trace
+```
+
+Expected headers:
+- `X-Trace-ID`: UUID format trace ID
+- `X-Request-ID`: Unique request ID
+
+3. **View traces in Jaeger:**
+
+   - Open http://localhost:16686
+   - Select service: `beamai_search_api`
+   - Click "Find Traces"
+   - You should see traces for your requests
+
+**Test Trace Propagation:**
+
+Send a request with a custom trace ID:
+
+```bash
+# Use a custom trace ID
+curl -H "X-Trace-ID: my-custom-trace-123" \
+  "http://localhost:8000/search?q=test&k=5"
+
+# Response will include the same trace ID
+```
+
+**Test Nested Spans:**
+
+Make a search request and view the trace in Jaeger:
+
+1. **Search request creates multiple spans:**
+   - Root span: `GET /search` (automatic from FastAPI instrumentation)
+   - Child span: `search.keyword` or `search.hybrid`
+   - Child span: `ranking.compute`
+   - Child span: `ranking.features.fetch`
+   - Child span: `database.query`
+
+2. **View span hierarchy in Jaeger:**
+   - Click on a trace to see the timeline
+   - Expand spans to see nested operations
+   - Check span attributes for metadata (query, user_id, result counts)
+
+**Test Span Attributes:**
+
+Spans include relevant attributes. In Jaeger, click on a span to see:
+- `search.query` - The search query
+- `search.results_count` - Number of results
+- `ranking.candidates_count` - Number of candidates ranked
+- `ranking.user_id` - User ID (if provided)
+- `http.method` - HTTP method (GET, POST)
+- `http.route` - Route path (`/search`, `/recommend`)
+- `http.status_code` - Response status code
+
+**Test Error Tracking:**
+
+Make a request that causes an error:
+
+```bash
+# Invalid query (should return 400)
+curl "http://localhost:8000/search?q="
+
+# View trace in Jaeger - error spans will be marked with red
+# Check span status and error messages
+```
+
+**Test Sampling:**
+
+Configure sampling rate (default: 100%):
+
+```bash
+# In .env file
+OTEL_TRACES_SAMPLER_ARG=0.1  # Sample 10% of traces
+```
+
+Restart backend and make multiple requests. Only 10% will be exported to Jaeger.
+
+**Run Tracing Tests:**
+
+```bash
+cd backend
+pytest tests/test_tracing.py -v
+pytest tests/test_tracing_integration.py -v
+```
+
+**Expected Test Output:**
+```
+tests/test_tracing.py::TestTracingConfiguration::test_configure_tracing_defaults PASSED
+tests/test_tracing.py::TestSpanCreation::test_create_span PASSED
+tests/test_tracing_integration.py::TestTracingHTTPRequests::test_trace_id_generated_for_request PASSED
+...
+```
+
+**Understanding Trace Structure:**
+
+A typical search request trace looks like:
+
+```
+GET /search
+├── search.keyword (or search.hybrid)
+│   ├── search.semantic (if hybrid)
+│   │   ├── search.semantic.embedding
+│   │   └── search.semantic.faiss
+│   └── database.query
+└── ranking.compute
+    ├── ranking.features.fetch
+    │   └── database.query
+    └── ranking.cf.compute (if user_id provided)
+```
+
+**Trace Duration Analysis:**
+
+In Jaeger, you can:
+- See total request duration
+- Identify slow operations (longest spans)
+- Compare trace durations across requests
+- Filter traces by duration
+
+**Common Use Cases:**
+
+1. **Debug Slow Requests:**
+   - Find traces with long duration
+   - Identify which span is slowest
+   - Check span attributes for context
+
+2. **Track Request Flow:**
+   - See how requests flow through services
+   - Verify all expected spans are created
+   - Check span relationships (parent-child)
+
+3. **Error Investigation:**
+   - Find traces with errors (red spans)
+   - Check error messages in span attributes
+   - See which operation failed
+
+4. **Performance Optimization:**
+   - Compare trace durations before/after changes
+   - Identify bottlenecks (longest spans)
+   - Track improvements over time
+
+**Integration with Logging:**
+
+Trace IDs from OpenTelemetry are automatically included in structured logs:
+- Logs include `trace_id` field
+- Correlate logs with traces using trace ID
+- Search logs by trace ID to see all log entries for a request
+
+**Integration with Metrics:**
+
+Traces complement metrics:
+- **Metrics**: Aggregate statistics (rate, latency percentiles)
+- **Traces**: Individual request details (what happened, why it was slow)
+
+Use both together for complete observability.
+
+**Production Considerations:**
+
+1. **Sampling**: Use lower sampling rate (10-20%) in production to reduce overhead
+2. **Export**: Use OTLP exporter for production (more efficient than Jaeger)
+3. **Storage**: Configure trace retention (Jaeger default: 7 days)
+4. **Performance**: Tracing has minimal overhead (~1-2% latency increase)
+
+### 11. Test Frontend
 
 1. Open http://localhost:5173 in your browser
 2. Navigate to the Search page
@@ -1323,6 +1599,69 @@ python -m app.services.features.compute
 - Check provisioning configuration: `monitoring/grafana/provisioning/dashboards/dashboards.yml`
 - Restart Grafana: `docker-compose restart grafana`
 
+### Tracing Issues
+
+**Problem: No traces appearing in Jaeger:**
+1. Verify Jaeger is running: `docker ps | grep jaeger` or check http://localhost:16686
+2. Check backend startup logs for `tracing_jaeger_configured` message
+3. Verify `OTEL_EXPORTER_JAEGER_ENDPOINT` is set correctly in `.env` file
+4. Check backend logs for Jaeger connection errors
+5. Make some API requests to generate traces (traces are created on request)
+6. Wait 5-10 seconds for spans to be exported (batch export)
+7. In Jaeger UI, select service: `beamai_search_api` and click "Find Traces"
+
+**Problem: Jaeger connection fails:**
+1. Check Jaeger container logs: `docker logs beamai-jaeger` (or `docker logs jaeger`)
+2. Verify Jaeger ports are accessible: `curl http://localhost:14268/api/traces` (should return 405 Method Not Allowed, which is expected)
+3. Check network connectivity: Ensure backend can reach Jaeger (same Docker network or `localhost`)
+4. If running backend locally, ensure Jaeger endpoint uses `localhost` not `jaeger`
+5. Check firewall settings if using remote Jaeger
+
+**Problem: Trace IDs not appearing in response headers:**
+1. Verify trace ID middleware is enabled: Check `app/main.py` for `TraceIDMiddleware`
+2. Check response headers: `curl -v "http://localhost:8000/health/" 2>&1 | grep -i trace`
+3. Verify OpenTelemetry is configured: Check backend logs for `tracing_configured` message
+4. Ensure FastAPI instrumentation is enabled: Check logs for `tracing_fastapi_instrumented`
+
+**Problem: Spans not being created:**
+1. Verify OpenTelemetry is configured: Check backend startup logs
+2. Check that `instrument_fastapi()` is called in `app/main.py`
+3. Verify manual spans are created: Check code for `tracer.start_as_current_span()` calls
+4. Make API requests and check Jaeger for traces
+5. Check backend logs for tracing-related errors
+
+**Problem: Trace sampling not working:**
+1. Verify `OTEL_TRACES_SAMPLER_ARG` is set in `.env` file (0.0 to 1.0)
+2. Restart backend after changing sampling rate
+3. Make multiple requests (at least 10) to see sampling effect
+4. Check Jaeger - should see approximately `sampling_rate * total_requests` traces
+
+**Problem: Trace context not propagating:**
+1. Verify trace context headers are sent: `curl -v -H "X-Trace-ID: test-123" "http://localhost:8000/search?q=test"`
+2. Check response includes same trace ID in `X-Trace-ID` header
+3. Verify W3C TraceContext format: Check for `traceparent` header support
+4. Check middleware logs for trace context extraction
+
+**Problem: High overhead from tracing:**
+1. Reduce sampling rate: Set `OTEL_TRACES_SAMPLER_ARG=0.1` (10% sampling)
+2. Check span creation: Avoid creating spans in tight loops
+3. Use batch export: Already configured with `BatchSpanProcessor`
+4. Consider disabling tracing in development: Set `OTEL_EXPORTER_JAEGER_ENDPOINT=disabled`
+
+**Problem: Traces missing spans:**
+1. Verify spans are created in code: Check for `tracer.start_as_current_span()` calls
+2. Check span names match expected patterns (e.g., `search.keyword`, `ranking.compute`)
+3. Verify spans are not filtered out by sampling
+4. Check Jaeger UI for complete trace structure
+5. Review backend logs for span creation messages
+
+**Problem: OTLP exporter not working:**
+1. Verify `OTEL_EXPORTER_OTLP_ENDPOINT` is set correctly
+2. Check OTLP endpoint is accessible
+3. Verify `enable_otlp=True` is passed to `configure_tracing()`
+4. Check backend logs for OTLP configuration errors
+5. Ensure OTLP endpoint supports gRPC protocol
+
 ---
 
 ## Development Workflow
@@ -1459,8 +1798,11 @@ npm run frontend          # Frontend only
 cd backend && pytest tests/
 cd backend && pytest tests/test_logging.py -v
 cd backend && pytest tests/test_trace_propagation.py -v
+cd backend && pytest tests/test_tracing.py -v
+cd backend && pytest tests/test_tracing_integration.py -v
 curl "http://localhost:8000/search?q=test&k=5"
 curl -H "X-Trace-ID: test-123" "http://localhost:8000/search?q=test&k=5"
+curl -v "http://localhost:8000/search?q=test&k=5" 2>&1 | grep -i trace
 
 # Feature Computation
 cd backend && python -m app.services.features.compute
@@ -1484,6 +1826,7 @@ cd backend && python scripts/seed_data.py
 - Metrics Endpoint: http://localhost:8000/metrics
 - Prometheus: http://localhost:9090
 - Grafana: http://localhost:3000 (admin/admin)
+- Jaeger UI: http://localhost:16686 (distributed tracing)
 
 ---
 
@@ -1496,11 +1839,12 @@ cd backend && python scripts/seed_data.py
 5. **Track events**: Simulate user interactions
 6. **Monitor features**: Recompute features and see how scores change
 7. **Test structured logging**: Verify trace IDs appear in logs and response headers
-8. **Read architecture docs**: Understand system design in `specs/`
+8. **Test distributed tracing**: View traces in Jaeger (http://localhost:16686)
+9. **Read architecture docs**: Understand system design in `specs/`
 
 ### Observability Features
 
-The system includes comprehensive observability features (Phase 1.1 & 1.2 - ✅ **COMPLETE**):
+The system includes comprehensive observability features (Phase 1.1, 1.2 & 1.3 - ✅ **COMPLETE**):
 
 **Structured Logging (Phase 1.1)**:
 - **Trace ID Propagation**: Every request gets a unique trace ID for correlation
@@ -1515,7 +1859,15 @@ The system includes comprehensive observability features (Phase 1.1 & 1.2 - ✅ 
 - **Resource Metrics**: CPU, memory, database connection pool usage
 - **Semantic Search Metrics**: Semantic search specific metrics (Phase 3.1)
 - **Collaborative Filtering Metrics**: CF scoring latency, cold start counts (Phase 3.2)
-- **Collaborative Filtering Metrics**: CF scoring latency, cold start counts (Phase 3.2)
+
+**Distributed Tracing (Phase 1.3)**:
+- **OpenTelemetry Integration**: Automatic span creation for HTTP requests
+- **Manual Spans**: Key operations instrumented (search, ranking, database, cache)
+- **Trace Export**: Traces exported to Jaeger for visualization
+- **Context Propagation**: W3C TraceContext format via HTTP headers
+- **Span Attributes**: Rich metadata (query, user_id, result counts, timing)
+- **Error Tracking**: Exceptions automatically recorded on spans
+- **Integration**: Trace IDs in logs and response headers for correlation
 
 **Grafana Dashboards**:
 - Service Health Overview
@@ -1537,9 +1889,15 @@ curl -v "http://localhost:8000/search?q=test&k=5" 2>&1 | grep -i trace
 curl http://localhost:8000/metrics
 
 # View metrics in Grafana (http://localhost:3000)
-```
 
-**Note**: Distributed Tracing (OpenTelemetry) is planned for Phase 1.3 but not yet implemented.
+# View traces in Jaeger (http://localhost:16686)
+# Select service: beamai_search_api
+# Click "Find Traces" to see request traces
+
+# Run tracing tests
+cd backend && pytest tests/test_tracing.py -v
+cd backend && pytest tests/test_tracing_integration.py -v
+```
 
 For more details, see the main [README.md](../README.md) file.
 
