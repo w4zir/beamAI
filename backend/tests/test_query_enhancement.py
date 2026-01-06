@@ -40,7 +40,13 @@ def temp_synonym_dict():
             "sneakers": ["running shoes", "trainers"],
             "laptop": ["notebook", "computer"],
         }, f)
-        yield Path(f.name)
+        f.flush()
+        f.seek(0)  # Reset file pointer
+        temp_path = Path(f.name)
+    yield temp_path
+    # Cleanup
+    if temp_path.exists():
+        temp_path.unlink()
 
 
 @pytest.fixture
@@ -51,7 +57,13 @@ def temp_abbreviation_dict():
             "tv": "television",
             "pc": "personal computer",
         }, f)
-        yield Path(f.name)
+        f.flush()
+        f.seek(0)  # Reset file pointer
+        temp_path = Path(f.name)
+    yield temp_path
+    # Cleanup
+    if temp_path.exists():
+        temp_path.unlink()
 
 
 def test_spell_correction_initialization():

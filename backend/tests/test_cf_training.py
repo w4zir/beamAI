@@ -122,10 +122,17 @@ class TestTrainingPipeline:
     
     def test_validate_matrix_warning_mode(self):
         """Test validating matrix with warning mode (non-strict)."""
-        # Create matrix with 93 interactions (below 100 but above 90)
+        # Create matrix with 93 unique interactions (below 100 but above 90)
         import numpy as np
-        rows = np.random.randint(0, 12, 93)
-        cols = np.random.randint(0, 21, 93)
+        # Ensure unique interactions by generating unique (row, col) pairs
+        interactions = set()
+        while len(interactions) < 93:
+            row = np.random.randint(0, 12)
+            col = np.random.randint(0, 21)
+            interactions.add((row, col))
+        
+        rows = np.array([r for r, c in interactions])
+        cols = np.array([c for r, c in interactions])
         data = np.ones(93)
         matrix = csr_matrix((data, (rows, cols)), shape=(12, 21))
         
