@@ -166,18 +166,21 @@ This document outlines the phased approach to evolve the current MVP into a prod
   - Trace export to backend (Jaeger/Tempo)
   - Trace ID included in all logs and error responses
 
-### 1.4 Alerting Rules
+### 1.4 Alerting Rules ✅ COMPLETE
 - **Implement**: Alerting based on SLOs
-- **Tools**: Prometheus Alertmanager or Grafana alerts
+- **Tools**: Prometheus Alertmanager
+- **Status**: ✅ Implemented
 - **Alerts**:
-  - p99 latency > 500ms for 5 minutes → Page on-call
-  - Error rate > 1% for 2 minutes → Slack alert
-  - Zero-result rate > 10% for 10 minutes → Investigate
-  - Database connection pool exhaustion → Alert
-  - Cache hit rate < 50% for 10 minutes → Investigate
+  - p99 latency > 500ms for 5 minutes → Page on-call ✅
+  - Error rate > 1% for 2 minutes → Slack alert ✅
+  - Zero-result rate > 10% for 10 minutes → Investigate ✅
+  - Database connection pool exhaustion → Alert ✅
+  - Cache hit rate < 50% for 10 minutes → Investigate ✅
 - **Deliverables**:
-  - Alertmanager configuration
-  - On-call runbook for each alert
+  - Alertmanager configuration ✅
+  - Alert rules file (alerts.yml) ✅
+  - On-call runbook for each alert ✅
+  - Unit and integration tests ✅
 
 **Success Criteria**:
 - All requests have trace IDs
@@ -216,31 +219,42 @@ This document outlines the phased approach to evolve the current MVP into a prod
   - Index rebuild pipeline (weekly batch job)
   - Fallback to keyword-only if index fails
 
-### 2.2 Query Enhancement (Rule-Based)
+### 2.2 Query Enhancement (Rule-Based) ✅ **COMPLETE**
+- **Status**: ✅ Implementation complete
 - **Implement**: Query preprocessing and expansion (rule-based foundation)
 - **Features**:
-  1. **Spell Correction**: Use SymSpell or similar
-     - Threshold: Suggest if confidence >80%
+  1. **Spell Correction**: ✅ Implemented using SymSpell
+     - Threshold: Suggest if confidence >80% (configurable)
+     - Dictionary built from product names and categories
      - Example: "runnig" → "running"
-  2. **Synonym Expansion**: Maintain synonym dictionary
+  2. **Synonym Expansion**: ✅ Implemented with OR expansion strategy
+     - Synonym dictionary: `backend/data/synonyms.json`
      - "sneakers" → ["running shoes", "trainers", "athletic shoes"]
-     - Expand query before search
-  3. **Query Classification**:
+     - Expand query before search with boost (original: 1.0, synonyms: 0.8)
+  3. **Query Classification**: ✅ Implemented rule-based classification
      - Navigational: "nike air max" (specific product)
      - Informational: "best running shoes" (needs ranking)
      - Transactional: "buy nike shoes" (high purchase intent)
-  4. **Query Normalization**:
+  4. **Query Normalization**: ✅ Implemented with abbreviation expansion
      - Lowercase, trim whitespace
      - Remove special characters
-     - Handle common abbreviations
-- **Deliverables**:
-  - Query normalization service
-  - Spell correction integration
-  - Synonym dictionary and expansion
-  - Query classification logic
-  - Metrics: Query expansion impact on results
+     - Handle common abbreviations (e.g., "tv" → "television")
+  5. **Intent Extraction**: ✅ Implemented basic rule-based extraction
+     - Brand extraction
+     - Category extraction
+     - Attribute extraction (color, size, etc.)
+- **Deliverables**: ✅ All complete
+  - ✅ Query normalization service (`app/services/search/normalization.py`)
+  - ✅ Spell correction integration (`app/services/search/spell_correction.py`)
+  - ✅ Synonym dictionary and expansion (`app/services/search/synonym_expansion.py`)
+  - ✅ Query classification logic (`app/services/search/query_classification.py`)
+  - ✅ Intent extraction (`app/services/search/intent_extraction.py`)
+  - ✅ Query enhancement orchestration (`app/services/search/query_enhancement.py`)
+  - ✅ Integration with search endpoint (feature flag: `ENABLE_QUERY_ENHANCEMENT`)
+  - ✅ Metrics: Query enhancement metrics (requests, spell correction, synonym expansion, classification, latency)
+  - ✅ Comprehensive unit and integration tests
 
-**Note**: Query Enhancement will be enhanced with AI-powered query understanding in AI Phase 1 (see AI Integration section below).
+**Note**: Query Enhancement will be enhanced with AI-powered query understanding in AI Phase 1 (see AI Integration section below). The current rule-based implementation provides a solid foundation.
 
 **Success Criteria**:
 - Semantic search returns relevant results for conceptual queries

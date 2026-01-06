@@ -15,10 +15,12 @@ from app.core.metrics import (
     record_cache_hit,
     record_cache_miss,
     record_ranking_score,
+    record_query_enhancement,
 )
 from app.services.search.keyword import search_keywords
 from app.services.search.hybrid import hybrid_search
 from app.services.search.semantic import get_semantic_search_service
+from app.services.search.query_enhancement import get_query_enhancement_service
 from app.services.ranking.score import rank_products
 
 logger = get_logger(__name__)
@@ -66,6 +68,36 @@ async def search(
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
     
     try:
+        # Check feature flag for query enhancement
+        enable_query_enhancement = os.getenv("ENABLE_QUERY_ENHANCEMENT", "false").lower() == "true"
+        
+        # Apply query enhancement if enabled
+        enhanced_query_obj = None
+        search_query = query  # Default to original query
+        
+        if enable_query_enhancement:
+            enhancement_service = get_query_enhancement_service()
+            enhanced_query_obj = enhancement_service.enhance(query)
+            search_query = enhanced_query_obj.get_final_query()
+            
+            # Record query enhancement metrics
+            record_query_enhancement(
+                correction_applied=enhanced_query_obj.correction_applied,
+                correction_confidence=enhanced_query_obj.corrected_confidence,
+                expansion_applied=enhanced_query_obj.expansion_applied,
+                classification=enhanced_query_obj.classification,
+                latency_seconds=enhanced_query_obj.enhancement_latency_ms / 1000.0,
+            )
+            
+            logger.info(
+                "query_enhancement_applied",
+                original_query=query,
+                final_query=search_query,
+                classification=enhanced_query_obj.classification,
+                correction_applied=enhanced_query_obj.correction_applied,
+                expansion_applied=enhanced_query_obj.expansion_applied,
+            )
+        
         # Check feature flag for semantic search
         enable_semantic = os.getenv("ENABLE_SEMANTIC_SEARCH", "false").lower() == "true"
         semantic_service = get_semantic_search_service()
@@ -75,26 +107,30 @@ async def search(
         logger.info(
             "search_started",
             query=query,
+            enhanced_query=search_query if enable_query_enhancement else None,
             user_id=user_id,
             k=k,
             enable_semantic=enable_semantic,
             semantic_available=semantic_available,
             use_hybrid=use_hybrid,
+            enable_query_enhancement=enable_query_enhancement,
         )
         
         # Get candidates from search service (hybrid or keyword only)
+        # Use enhanced query for search
         if use_hybrid:
-            candidates = hybrid_search(query, limit=k * 2)
+            candidates = hybrid_search(search_query, limit=k * 2)
         else:
-            candidates = search_keywords(query, limit=k * 2)
+            candidates = search_keywords(search_query, limit=k * 2)
         
         if not candidates:
             latency_ms = int((time.time() - start_time) * 1000)
-            # Record zero-result metric
+            # Record zero-result metric (use original query for pattern matching)
             record_search_zero_result(query=query)
             logger.info(
                 "search_zero_results",
                 query=query,
+                enhanced_query=search_query if enable_query_enhancement else None,
                 user_id=user_id,
                 latency_ms=latency_ms,
             )
@@ -138,10 +174,12 @@ async def search(
         logger.info(
             "search_completed",
             query=query,
+            enhanced_query=search_query if enable_query_enhancement else None,
             user_id=user_id,
             results_count=len(results),
             latency_ms=latency_ms,
             use_hybrid=use_hybrid,
+            enable_query_enhancement=enable_query_enhancement,
         )
         
         return results

@@ -7,7 +7,11 @@ This directory contains the configuration for Prometheus metrics collection and 
 ```
 Backend API (FastAPI)
     ↓ (exposes /metrics endpoint)
-Prometheus (scrapes metrics every 15s)
+Prometheus (scrapes metrics every 15s, evaluates alert rules)
+    ↓ (sends alerts)
+Alertmanager (manages alerts, routes notifications)
+    ↓ (notifications)
+Notification Channels (Slack, PagerDuty, Email)
     ↓ (data source)
 Grafana (visualizes metrics in dashboards)
 ```
@@ -18,7 +22,24 @@ Grafana (visualizes metrics in dashboards)
 - **Port**: 9090
 - **URL**: http://localhost:9090
 - **Configuration**: `prometheus/prometheus.yml`
+- **Alert Rules**: `prometheus/alerts.yml`
 - **Scrapes**: Backend metrics endpoint at `backend:8000/metrics`
+- **Evaluates**: Alert rules every 15 seconds
+- **Sends Alerts**: To Alertmanager at `alertmanager:9093`
+
+### Alertmanager
+- **Port**: 9093
+- **URL**: http://localhost:9093
+- **Configuration**: `alertmanager/alertmanager.yml`
+- **Features**:
+  - Alert routing by severity
+  - Alert grouping and deduplication
+  - Alert silencing
+  - Notification channel management
+- **Alert Routing**:
+  - Critical alerts → PagerDuty (page on-call)
+  - Warning alerts → Slack #alerts channel
+  - Info alerts → Default receiver
 
 ### Grafana
 - **Port**: 3000
@@ -67,7 +88,7 @@ Five dashboards are automatically provisioned:
 The monitoring stack is included in `docker-compose.yml`. To start:
 
 ```bash
-docker-compose up -d prometheus grafana
+docker-compose up -d prometheus alertmanager grafana
 ```
 
 Or start everything:
@@ -85,6 +106,14 @@ docker-compose up -d
 2. **Prometheus**: http://localhost:9090
    - Use PromQL queries to explore metrics
    - Check targets at: http://localhost:9090/targets
+   - View alert rules at: http://localhost:9090/alerts
+   - Check alert status at: http://localhost:9090/alerts
+
+3. **Alertmanager**: http://localhost:9093
+   - View active alerts
+   - View alert history
+   - Silence alerts
+   - Test notification channels
 
 ## Testing
 
@@ -157,13 +186,69 @@ Update `docker-compose.yml` environment variables:
 - `GF_SECURITY_ADMIN_USER`
 - `GF_SECURITY_ADMIN_PASSWORD`
 
+## Alerting Rules
+
+The system includes 5 production-grade alert rules (Phase 1.4 - ✅ **COMPLETE**):
+
+### Critical Alerts (Page On-Call)
+
+1. **p99_latency_high**
+   - Condition: p99 latency > 500ms for 5 minutes
+   - Severity: Critical
+   - Action: Page on-call engineer
+   - Runbook: `docs/runbooks/p99_latency_high.md`
+
+2. **error_rate_high**
+   - Condition: Error rate > 1% for 2 minutes
+   - Severity: Critical
+   - Action: Page on-call engineer
+   - Runbook: `docs/runbooks/error_rate_high.md`
+
+3. **db_pool_exhausted**
+   - Condition: Available connections < 2 for 2 minutes
+   - Severity: Critical
+   - Action: Page on-call engineer
+   - Runbook: `docs/runbooks/db_pool_exhausted.md`
+
+### Warning Alerts (Slack Notification)
+
+4. **zero_result_rate_high**
+   - Condition: Zero-result rate > 10% for 10 minutes
+   - Severity: Warning
+   - Action: Slack alert to #alerts channel
+   - Runbook: `docs/runbooks/zero_result_rate_high.md`
+
+5. **cache_hit_rate_low**
+   - Condition: Cache hit rate < 50% for 10 minutes
+   - Severity: Warning
+   - Action: Slack alert to #alerts channel
+   - Runbook: `docs/runbooks/cache_hit_rate_low.md`
+
+**View Alert Rules:**
+- Alert rules are defined in `monitoring/prometheus/alerts.yml`
+- View active alerts in Alertmanager: http://localhost:9093
+- View alert rules in Prometheus: http://localhost:9090/alerts
+
+**Testing Alerts:**
+- Unit tests: `backend/tests/test_alerting_rules.py`
+- Integration tests: `backend/tests/test_alerting_integration.py`
+- Run tests: `pytest backend/tests/test_alerting*.py -v`
+
+**Configuring Notification Channels:**
+Edit `monitoring/alertmanager/alertmanager.yml` to configure:
+- Slack webhook URL (uncomment and add your webhook)
+- PagerDuty integration key (uncomment and add your key)
+- Email SMTP settings (uncomment and configure)
+
 ## Production Considerations
 
 For production deployments:
 1. Change default Grafana credentials
 2. Enable authentication for Prometheus (if exposed)
-3. Configure alerting rules in Prometheus
-4. Set up persistent storage for Prometheus data
-5. Consider using Grafana Cloud or managed Prometheus services
-6. Implement proper backup strategies for dashboard configurations
+3. Configure notification channels in Alertmanager (Slack, PagerDuty, Email)
+4. Set up persistent storage for Prometheus and Alertmanager data
+5. Review and adjust alert thresholds based on production SLOs
+6. Set up alert escalation policies
+7. Consider using Grafana Cloud or managed Prometheus services
+8. Implement proper backup strategies for dashboard and alert configurations
 
