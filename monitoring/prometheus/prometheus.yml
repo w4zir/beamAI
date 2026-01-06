@@ -8,6 +8,18 @@ global:
     cluster: 'beamai-local'
     environment: 'development'
 
+# Alerting configuration
+# Prometheus sends alerts to Alertmanager
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - 'alertmanager:9093'
+
+# Load alert rules
+rule_files:
+  - 'alerts.yml'
+
 # Scrape configurations
 scrape_configs:
   # Scrape the FastAPI backend metrics endpoint

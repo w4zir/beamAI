@@ -85,8 +85,13 @@ SUPABASE_SERVICE_KEY=your_service_role_key
 LOG_LEVEL=INFO                    # DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_JSON=true                     # true for JSON output (production), false for console (development)
 
-# Semantic Search Configuration (Phase 3.1)
+# Semantic Search Configuration (Phase 2.1)
 ENABLE_SEMANTIC_SEARCH=false      # Set to true to enable hybrid search (requires FAISS index)
+
+# Query Enhancement Configuration (Phase 2.2)
+ENABLE_QUERY_ENHANCEMENT=false    # Set to true to enable query enhancement (spell correction, synonym expansion, classification)
+QUERY_SPELL_CORRECTION_THRESHOLD=0.8  # Confidence threshold for spell correction (0.0-1.0, default: 0.8)
+QUERY_MAX_SYNONYMS=5              # Maximum number of synonyms per term (default: 5)
 
 # OpenTelemetry Distributed Tracing Configuration (Phase 1.3)
 OTEL_SERVICE_NAME=beamai_search_api              # Service name for traces
@@ -576,6 +581,90 @@ curl "http://localhost:8000/search?q=comfortable%20shoes&k=5"
 
 **Note**: The semantic search service loads the FAISS index on application startup. If the index is not available, the system gracefully falls back to keyword-only search without errors.
 
+### 10. Test Query Enhancement (Phase 2.2)
+
+**Status**: ✅ Query enhancement is implemented and available.
+
+**Enable query enhancement:**
+
+Add to your `.env` file:
+
+```bash
+# Enable query enhancement (spell correction, synonym expansion, classification)
+ENABLE_QUERY_ENHANCEMENT=true
+```
+
+**Query Enhancement Features:**
+
+1. **Spell Correction**: Corrects spelling errors in queries using SymSpell
+   - Dictionary built from product names and categories
+   - Only applies corrections with confidence >80% (configurable)
+   - Max edit distance: 2
+
+2. **Synonym Expansion**: Expands queries with synonyms using OR expansion
+   - Synonym dictionary: `backend/data/synonyms.json`
+   - Original terms get boost 1.0, synonyms get boost 0.8
+   - Max 3-5 synonyms per term (configurable)
+
+3. **Query Classification**: Classifies queries into:
+   - **Navigational**: Specific product/brand search (e.g., "nike air max")
+   - **Informational**: General information search (e.g., "best running shoes")
+   - **Transactional**: Purchase intent (e.g., "buy cheap laptops")
+
+4. **Query Normalization**: Standardizes queries
+   - Lowercase conversion
+   - Whitespace normalization
+   - Punctuation removal
+   - Abbreviation expansion (e.g., "tv" → "television")
+
+5. **Intent Extraction**: Extracts entities from queries
+   - Brand extraction
+   - Category extraction
+   - Attribute extraction (color, size, etc.)
+
+**Test query enhancement:**
+
+```bash
+# Test with misspelled query (spell correction)
+curl "http://localhost:8000/search?q=runnig%20shoes&k=5"
+
+# Test with synonym (synonym expansion)
+curl "http://localhost:8000/search?q=sneakers&k=5"
+
+# Test with purchase intent (query classification)
+curl "http://localhost:8000/search?q=buy%20cheap%20laptops&k=5"
+
+# Test with abbreviation (normalization)
+curl "http://localhost:8000/search?q=tv%20stand&k=5"
+```
+
+**Verify query enhancement is working:**
+- Check backend logs for `query_enhancement_applied` events
+- Check logs for `correction_applied`, `expansion_applied`, and `classification` fields
+- View metrics at `/metrics` endpoint:
+  - `query_enhancement_requests_total`
+  - `query_spell_correction_total{applied="true"}`
+  - `query_synonym_expansion_total{applied="true"}`
+  - `query_classification_distribution{classification="..."}`
+
+**Configuration Options:**
+
+```bash
+# Spell correction confidence threshold (0.0-1.0)
+QUERY_SPELL_CORRECTION_THRESHOLD=0.8
+
+# Maximum synonyms per term
+QUERY_MAX_SYNONYMS=5
+
+# Custom synonym dictionary path (optional)
+QUERY_SYNONYM_DICT_PATH=backend/data/synonyms.json
+
+# Custom abbreviation dictionary path (optional)
+QUERY_ABBREVIATION_DICT_PATH=backend/data/abbreviations.json
+```
+
+**Note**: Query enhancement is disabled by default (`ENABLE_QUERY_ENHANCEMENT=false`). Enable it for gradual rollout. The system processes queries through: normalization → spell correction → synonym expansion → classification → intent extraction. All enhancements are optional and can be disabled via feature flag.
+
 ### 9. Test Collaborative Filtering (Phase 3.2)
 
 **Status**: ✅ Collaborative filtering is implemented and available.
@@ -874,7 +963,11 @@ The system includes comprehensive metrics collection using Prometheus and visual
 ```
 Backend API (FastAPI)
     ↓ (exposes /metrics endpoint)
-Prometheus (scrapes metrics every 15s)
+Prometheus (scrapes metrics every 15s, evaluates alert rules)
+    ↓ (sends alerts)
+Alertmanager (manages alerts, routes notifications)
+    ↓ (notifications)
+Notification Channels (Slack, PagerDuty, Email)
     ↓ (data source)
 Grafana (visualizes metrics in dashboards)
 ```
@@ -887,7 +980,7 @@ The monitoring stack is included in `docker-compose.yml`. Start Prometheus and G
 
 ```bash
 # Start only monitoring services
-docker-compose up -d prometheus grafana
+docker-compose up -d prometheus alertmanager grafana
 
 # Or start everything including backend
 docker-compose up -d
@@ -930,6 +1023,55 @@ system_memory_usage_bytes / 1024 / 1024  # MB
 # Cache hit rate
 rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m]))
 ```
+
+### Accessing Alertmanager
+
+- **URL**: http://localhost:9093
+- **Alertmanager UI**: View active alerts, alert history, and silence alerts
+- **Status**: http://localhost:9093/api/v1/status
+
+**Alertmanager Features:**
+- View active alerts and their status
+- View alert history
+- Silence alerts (temporarily suppress notifications)
+- View alert grouping and routing
+- Test notification channels
+
+**Alert Rules:**
+- Alert rules are defined in `monitoring/prometheus/alerts.yml`
+- Prometheus evaluates rules every 15 seconds
+- Alerts are sent to Alertmanager when conditions are met
+
+**Alert Routing:**
+- **Critical alerts** (p99_latency_high, error_rate_high, db_pool_exhausted) → PagerDuty (page on-call)
+- **Warning alerts** (zero_result_rate_high, cache_hit_rate_low) → Slack #alerts channel
+- **Info alerts** → Default receiver (email/Slack)
+
+**Configure Notification Channels:**
+Edit `monitoring/alertmanager/alertmanager.yml` to configure:
+- Slack webhook URL
+- PagerDuty integration key
+- Email SMTP settings
+
+**View Active Alerts:**
+1. Open http://localhost:9093
+2. Click "Alerts" to see active alerts
+3. Click on an alert to see details, labels, and annotations
+
+**Silence Alerts:**
+1. Open http://localhost:9093
+2. Click "Silences" → "New Silence"
+3. Configure silence matchers (alertname, severity, etc.)
+4. Set duration and reason
+5. Click "Create"
+
+**Runbooks:**
+Each alert has a detailed runbook in `docs/runbooks/`:
+- `p99_latency_high.md` - High latency troubleshooting
+- `error_rate_high.md` - High error rate troubleshooting
+- `zero_result_rate_high.md` - High zero-result rate troubleshooting
+- `db_pool_exhausted.md` - Database pool exhaustion troubleshooting
+- `cache_hit_rate_low.md` - Low cache hit rate troubleshooting
 
 ### Accessing Grafana
 

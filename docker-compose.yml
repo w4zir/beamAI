@@ -137,6 +137,25 @@ services:
       - beamai-network
     restart: unless-stopped
 
+  # Alertmanager - Alert Management
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: beamai-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+    depends_on:
+      - prometheus
+    networks:
+      - beamai-network
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     driver: local
@@ -147,6 +166,8 @@ volumes:
   prometheus_data:
     driver: local
   grafana_data:
+    driver: local
+  alertmanager_data:
     driver: local
 
 networks:
