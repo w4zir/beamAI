@@ -60,7 +60,7 @@ def compute_final_score(
     return final_score
 
 
-def rank_products(
+async def rank_products(
     candidates: List[Tuple[str, float]],
     is_search: bool = True,
     user_id: Optional[str] = None
@@ -108,9 +108,10 @@ def rank_products(
         product_ids = [product_id for product_id, _ in candidates]
         search_scores = {product_id: score for product_id, score in candidates}
         
-        # Get product features
+        # Get product features (async, Phase 3.5)
         with tracer.start_as_current_span("ranking.features.fetch") as features_span:
-            features = get_product_features(product_ids)
+            from app.services.ranking.features import get_product_features
+            features = await get_product_features(product_ids)
             set_span_attribute("ranking.features_count", len(features))
     
         if not features:

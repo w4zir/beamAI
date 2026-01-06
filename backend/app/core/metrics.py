@@ -77,18 +77,132 @@ search_zero_results_total = Counter(
     registry=registry,
 )
 
-# Cache hits and misses
+# Cache hits and misses (Phase 3.1)
 cache_hits_total = Counter(
     "cache_hits_total",
     "Total number of cache hits",
-    ["cache_type"],  # e.g., "search", "recommendation", "features"
+    ["cache_type", "cache_layer"],  # e.g., "search", "query_result"
     registry=registry,
 )
 
 cache_misses_total = Counter(
     "cache_misses_total",
     "Total number of cache misses",
-    ["cache_type"],
+    ["cache_type", "cache_layer"],
+    registry=registry,
+)
+
+# Cache operation latency (Phase 3.1)
+cache_operation_latency_seconds = Histogram(
+    "cache_operation_latency_seconds",
+    "Cache operation latency in seconds",
+    ["cache_type", "operation"],  # operation: "get", "set", "delete"
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5],
+    registry=registry,
+)
+
+# Cache errors (Phase 3.1)
+cache_errors_total = Counter(
+    "cache_errors_total",
+    "Total number of cache errors",
+    ["cache_type", "reason"],  # reason: "timeout", "connection_error", etc.
+    registry=registry,
+)
+
+# Cache invalidations (Phase 3.1)
+cache_invalidations_total = Counter(
+    "cache_invalidations_total",
+    "Total number of cache invalidations",
+    ["cache_type", "reason"],  # reason: "product_update", "manual", etc.
+    registry=registry,
+)
+
+# Circuit breaker state (Phase 3.1, 3.3)
+cache_circuit_breaker_state = Gauge(
+    "cache_circuit_breaker_state",
+    "Circuit breaker state (0=closed, 1=open, 2=half-open)",
+    ["circuit_breaker_name"],
+    registry=registry,
+)
+
+# Rate limiting metrics (Phase 3.2)
+rate_limit_hits_total = Counter(
+    "rate_limit_hits_total",
+    "Total number of rate limit hits",
+    ["endpoint", "type"],  # type: "ip", "api_key"
+    registry=registry,
+)
+
+rate_limit_abuse_detected_total = Counter(
+    "rate_limit_abuse_detected_total",
+    "Total number of abuse patterns detected",
+    ["pattern"],  # pattern: "same_query", "sequential_enumeration"
+    registry=registry,
+)
+
+rate_limit_whitelist_size = Gauge(
+    "rate_limit_whitelist_size",
+    "Number of IPs/keys in whitelist",
+    registry=registry,
+)
+
+rate_limit_blacklist_size = Gauge(
+    "rate_limit_blacklist_size",
+    "Number of IPs/keys in blacklist",
+    registry=registry,
+)
+
+# Circuit breaker metrics (Phase 3.3)
+circuit_breaker_state_changes_total = Counter(
+    "circuit_breaker_state_changes_total",
+    "Total number of circuit breaker state changes",
+    ["circuit_breaker_name", "from_state", "to_state"],
+    registry=registry,
+)
+
+circuit_breaker_failures_total = Counter(
+    "circuit_breaker_failures_total",
+    "Total number of circuit breaker failures",
+    ["circuit_breaker_name"],
+    registry=registry,
+)
+
+# Database metrics (Phase 3.4)
+db_query_duration_seconds = Histogram(
+    "db_query_duration_seconds",
+    "Database query duration in seconds",
+    ["query_type"],  # query_type: "search", "recommendation", "feature"
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
+    registry=registry,
+)
+
+db_slow_queries_total = Counter(
+    "db_slow_queries_total",
+    "Total number of slow queries (>100ms)",
+    ["query_type", "threshold"],  # threshold: "100ms"
+    registry=registry,
+)
+
+db_replication_lag_seconds = Gauge(
+    "db_replication_lag_seconds",
+    "Database replication lag in seconds",
+    ["replica"],
+    registry=registry,
+)
+
+db_replica_health = Gauge(
+    "db_replica_health",
+    "Database replica health (1=healthy, 0=unhealthy)",
+    ["replica"],
+    registry=registry,
+)
+
+# Async operation metrics (Phase 3.5)
+async_operation_duration_seconds = Histogram(
+    "async_operation_duration_seconds",
+    "Async operation duration in seconds",
+    ["operation_type"],  # operation_type: "feature_fetch", "cache_lookup", etc.
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
     registry=registry,
 )
 
@@ -348,24 +462,178 @@ def record_search_zero_result(query: Optional[str] = None) -> None:
     search_zero_results_total.labels(query_pattern=query_pattern).inc()
 
 
-def record_cache_hit(cache_type: str) -> None:
+def record_cache_hit(cache_type: str, cache_layer: str = "unknown") -> None:
     """
     Record a cache hit.
     
     Args:
         cache_type: Type of cache (e.g., "search", "recommendation", "features")
+        cache_layer: Cache layer (e.g., "query_result", "feature", "ranking")
     """
-    cache_hits_total.labels(cache_type=cache_type).inc()
+    cache_hits_total.labels(cache_type=cache_type, cache_layer=cache_layer).inc()
 
 
-def record_cache_miss(cache_type: str) -> None:
+def record_cache_miss(cache_type: str, cache_layer: str = "unknown") -> None:
     """
     Record a cache miss.
     
     Args:
         cache_type: Type of cache (e.g., "search", "recommendation", "features")
+        cache_layer: Cache layer (e.g., "query_result", "feature", "ranking")
     """
-    cache_misses_total.labels(cache_type=cache_type).inc()
+    cache_misses_total.labels(cache_type=cache_type, cache_layer=cache_layer).inc()
+
+
+def record_cache_operation_latency(cache_type: str, operation: str, duration_seconds: float) -> None:
+    """
+    Record cache operation latency.
+    
+    Args:
+        cache_type: Type of cache
+        operation: Operation type ("get", "set", "delete")
+        duration_seconds: Operation duration in seconds
+    """
+    cache_operation_latency_seconds.labels(cache_type=cache_type, operation=operation).observe(duration_seconds)
+
+
+def record_cache_error(cache_type: str, reason: str) -> None:
+    """
+    Record a cache error.
+    
+    Args:
+        cache_type: Type of cache
+        reason: Error reason ("timeout", "connection_error", etc.)
+    """
+    cache_errors_total.labels(cache_type=cache_type, reason=reason).inc()
+
+
+def record_cache_invalidation(cache_type: str, reason: str) -> None:
+    """
+    Record a cache invalidation.
+    
+    Args:
+        cache_type: Type of cache
+        reason: Invalidation reason ("product_update", "manual", etc.)
+    """
+    cache_invalidations_total.labels(cache_type=cache_type, reason=reason).inc()
+
+
+def update_circuit_breaker_state(circuit_breaker_name: str, state: int) -> None:
+    """
+    Update circuit breaker state metric.
+    
+    Args:
+        circuit_breaker_name: Name of circuit breaker
+        state: State (0=closed, 1=open, 2=half-open)
+    """
+    cache_circuit_breaker_state.labels(circuit_breaker_name=circuit_breaker_name).set(state)
+
+
+def record_rate_limit_hit(endpoint: str, limit_type: str) -> None:
+    """
+    Record a rate limit hit.
+    
+    Args:
+        endpoint: Endpoint name
+        limit_type: Type of limit ("ip", "api_key")
+    """
+    rate_limit_hits_total.labels(endpoint=endpoint, type=limit_type).inc()
+
+
+def record_abuse_detection(pattern: str) -> None:
+    """
+    Record abuse pattern detection.
+    
+    Args:
+        pattern: Abuse pattern ("same_query", "sequential_enumeration")
+    """
+    rate_limit_abuse_detected_total.labels(pattern=pattern).inc()
+
+
+def update_rate_limit_list_sizes(whitelist_size: int, blacklist_size: int) -> None:
+    """
+    Update rate limit list sizes.
+    
+    Args:
+        whitelist_size: Number of entries in whitelist
+        blacklist_size: Number of entries in blacklist
+    """
+    rate_limit_whitelist_size.set(whitelist_size)
+    rate_limit_blacklist_size.set(blacklist_size)
+
+
+def record_circuit_breaker_state_change(circuit_breaker_name: str, from_state: str, to_state: str) -> None:
+    """
+    Record circuit breaker state change.
+    
+    Args:
+        circuit_breaker_name: Name of circuit breaker
+        from_state: Previous state
+        to_state: New state
+    """
+    circuit_breaker_state_changes_total.labels(
+        circuit_breaker_name=circuit_breaker_name,
+        from_state=from_state,
+        to_state=to_state
+    ).inc()
+
+
+def record_circuit_breaker_failure(circuit_breaker_name: str) -> None:
+    """
+    Record circuit breaker failure.
+    
+    Args:
+        circuit_breaker_name: Name of circuit breaker
+    """
+    circuit_breaker_failures_total.labels(circuit_breaker_name=circuit_breaker_name).inc()
+
+
+def record_db_query_duration(query_type: str, duration_seconds: float) -> None:
+    """
+    Record database query duration.
+    
+    Args:
+        query_type: Type of query ("search", "recommendation", "feature")
+        duration_seconds: Query duration in seconds
+    """
+    db_query_duration_seconds.labels(query_type=query_type).observe(duration_seconds)
+    
+    # Record slow queries (>100ms)
+    if duration_seconds > 0.1:
+        db_slow_queries_total.labels(query_type=query_type, threshold="100ms").inc()
+
+
+def update_replication_lag(replica: str, lag_seconds: float) -> None:
+    """
+    Update replication lag metric.
+    
+    Args:
+        replica: Replica name
+        lag_seconds: Replication lag in seconds
+    """
+    db_replication_lag_seconds.labels(replica=replica).set(lag_seconds)
+
+
+def update_replica_health(replica: str, healthy: bool) -> None:
+    """
+    Update replica health metric.
+    
+    Args:
+        replica: Replica name
+        healthy: Health status (True=healthy, False=unhealthy)
+    """
+    db_replica_health.labels(replica=replica).set(1 if healthy else 0)
+
+
+def record_async_operation_duration(operation_type: str, duration_seconds: float) -> None:
+    """
+    Record async operation duration.
+    
+    Args:
+        operation_type: Type of operation ("feature_fetch", "cache_lookup", etc.)
+        duration_seconds: Operation duration in seconds
+    """
+    async_operation_duration_seconds.labels(operation_type=operation_type).observe(duration_seconds)
 
 
 def record_ranking_score(product_id: str, score: float) -> None:

@@ -98,7 +98,18 @@ OTEL_SERVICE_NAME=beamai_search_api              # Service name for traces
 OTEL_EXPORTER_JAEGER_ENDPOINT=http://localhost:14268/api/traces  # Jaeger endpoint (or set to "disabled" to disable)
 OTEL_TRACES_SAMPLER_ARG=1.0                     # Sampling rate (0.0-1.0, 1.0 = 100% sampling)
 OTEL_EXPORTER_OTLP_ENDPOINT=                    # OTLP endpoint (alternative to Jaeger, optional)
+
+# Phase 3: Performance & Resilience (Phase 3)
+REDIS_URL=redis://redis:6379                    # Redis URL for caching and rate limiting
+DB_READ_REPLICA_URLS=                           # Comma-separated read replica URLs (optional)
 ```
+
+**Phase 3 Features:**
+- **Redis Caching**: Multi-level caching for query results, features, and ranking config
+- **Rate Limiting**: Per-IP and per-API-key rate limiting with abuse detection
+- **Circuit Breakers**: Automatic fallback for Redis, Database, and FAISS failures
+- **Database Connection Pooling**: Async connection pool with read/write splitting
+- **Async Optimization**: Async/await for better concurrency
 
 **Structured Logging:**
 - The system uses `structlog` for structured JSON logging
