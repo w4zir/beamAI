@@ -12,10 +12,8 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Load environment variables from .env file
-env_path = Path(__file__).parent.parent.parent / ".env"
-if not env_path.exists():
-    env_path = Path(__file__).parent.parent / ".env"
+# Load environment variables from .env file in root directory
+env_path = Path(__file__).parent.parent.parent.parent / ".env"
 
 if env_path.exists():
     load_dotenv(env_path)

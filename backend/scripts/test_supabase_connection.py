@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 # Add parent directory to path to import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Load environment variables from .env file
-env_path = Path(__file__).parent.parent / ".env"
+# Load environment variables from .env file in root directory
+env_path = Path(__file__).parent.parent.parent / ".env"
 if env_path.exists():
     load_dotenv(env_path)
     print(f"Loaded environment from {env_path}")
