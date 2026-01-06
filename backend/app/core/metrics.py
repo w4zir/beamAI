@@ -213,6 +213,51 @@ semantic_index_available = Gauge(
     registry=registry,
 )
 
+# ============================================================================
+# QUERY ENHANCEMENT METRICS
+# ============================================================================
+
+query_enhancement_requests_total = Counter(
+    "query_enhancement_requests_total",
+    "Total number of query enhancement requests",
+    registry=registry,
+)
+
+query_spell_correction_total = Counter(
+    "query_spell_correction_total",
+    "Total number of spell correction attempts",
+    ["applied"],  # "true" or "false"
+    registry=registry,
+)
+
+query_spell_correction_confidence = Histogram(
+    "query_spell_correction_confidence",
+    "Distribution of spell correction confidence scores",
+    buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    registry=registry,
+)
+
+query_synonym_expansion_total = Counter(
+    "query_synonym_expansion_total",
+    "Total number of synonym expansion attempts",
+    ["applied"],  # "true" or "false"
+    registry=registry,
+)
+
+query_classification_distribution = Counter(
+    "query_classification_distribution",
+    "Distribution of query classifications",
+    ["classification"],  # "navigational", "informational", "transactional"
+    registry=registry,
+)
+
+query_enhancement_latency_seconds = Histogram(
+    "query_enhancement_latency_seconds",
+    "Query enhancement latency in seconds",
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
+    registry=registry,
+)
+
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -396,4 +441,45 @@ def get_metrics_content_type() -> str:
         Content type string for Prometheus metrics
     """
     return CONTENT_TYPE_LATEST
+
+
+# ============================================================================
+# QUERY ENHANCEMENT METRIC HELPERS
+# ============================================================================
+
+def record_query_enhancement(
+    correction_applied: bool = False,
+    correction_confidence: float = 0.0,
+    expansion_applied: bool = False,
+    classification: Optional[str] = None,
+    latency_seconds: float = 0.0,
+) -> None:
+    """
+    Record query enhancement metrics.
+    
+    Args:
+        correction_applied: Whether spell correction was applied
+        correction_confidence: Spell correction confidence score (0.0 to 1.0)
+        expansion_applied: Whether synonym expansion was applied
+        classification: Query classification (navigational/informational/transactional)
+        latency_seconds: Query enhancement latency in seconds
+    """
+    # Record total requests
+    query_enhancement_requests_total.inc()
+    
+    # Record spell correction
+    query_spell_correction_total.labels(applied=str(correction_applied).lower()).inc()
+    if correction_applied and correction_confidence > 0:
+        query_spell_correction_confidence.observe(correction_confidence)
+    
+    # Record synonym expansion
+    query_synonym_expansion_total.labels(applied=str(expansion_applied).lower()).inc()
+    
+    # Record classification
+    if classification:
+        query_classification_distribution.labels(classification=classification).inc()
+    
+    # Record latency
+    if latency_seconds > 0:
+        query_enhancement_latency_seconds.observe(latency_seconds)
 

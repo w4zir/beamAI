@@ -1,0 +1,162 @@
+# Prometheus Alert Rules for BeamAI Search & Recommendation API
+# Phase 1.4: Alerting Rules Implementation
+#
+# These alert rules follow the specifications in:
+# - docs/TODO/phase1_TODO_checklist.md
+# - specs/OBSERVABILITY.md
+#
+# Alert Rules:
+# 1. p99_latency_high - Critical alert for high latency (p99 > 500ms)
+# 2. error_rate_high - Critical alert for high error rate (> 1%)
+# 3. zero_result_rate_high - Warning alert for high zero-result rate (> 10%)
+# 4. db_pool_exhausted - Critical alert for database connection pool exhaustion
+# 5. cache_hit_rate_low - Warning alert for low cache hit rate (< 50%)
+
+groups:
+  - name: beamai_alerts
+    interval: 15s  # Evaluate rules every 15 seconds (matching scrape interval)
+    rules:
+      # ========================================================================
+      # Alert 1: High Latency (p99 > 500ms)
+      # ========================================================================
+      - alert: p99_latency_high
+        expr: |
+          histogram_quantile(0.99, 
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint, method)
+          ) > 0.5
+        for: 5m  # Alert must persist for 5 minutes before firing
+        labels:
+          severity: critical
+          service: beamai-backend
+          alert_type: latency
+        annotations:
+          summary: "High p99 latency detected on {{ $labels.endpoint }}"
+          description: |
+            The p99 latency for {{ $labels.method }} {{ $labels.endpoint }} is {{ $value }}s,
+            which exceeds the threshold of 0.5s (500ms).
+            
+            This indicates potential performance degradation that may impact user experience.
+            
+            Runbook: docs/runbooks/p99_latency_high.md
+          runbook_url: "docs/runbooks/p99_latency_high.md"
+          value: "{{ $value }}s"
+
+      # ========================================================================
+      # Alert 2: High Error Rate (> 1%)
+      # ========================================================================
+      - alert: error_rate_high
+        expr: |
+          (
+            sum(rate(http_errors_total[2m])) by (endpoint, status_code)
+            /
+            sum(rate(http_requests_total[2m])) by (endpoint)
+          ) > 0.01
+        for: 2m  # Alert must persist for 2 minutes before firing
+        labels:
+          severity: critical
+          service: beamai-backend
+          alert_type: errors
+        annotations:
+          summary: "High error rate detected on {{ $labels.endpoint }}"
+          description: |
+            The error rate for {{ $labels.endpoint }} is {{ $value | humanizePercentage }},
+            which exceeds the threshold of 1%.
+            
+            Status code: {{ $labels.status_code }}
+            
+            This indicates potential service degradation or failures.
+            
+            Runbook: docs/runbooks/error_rate_high.md
+          runbook_url: "docs/runbooks/error_rate_high.md"
+          value: "{{ $value | humanizePercentage }}"
+
+      # ========================================================================
+      # Alert 3: High Zero-Result Rate (> 10%)
+      # ========================================================================
+      - alert: zero_result_rate_high
+        expr: |
+          (
+            sum(rate(search_zero_results_total[10m])) by (query_pattern)
+            /
+            sum(rate(http_requests_total{endpoint="/search"}[10m]))
+          ) > 0.1
+        for: 10m  # Alert must persist for 10 minutes before firing
+        labels:
+          severity: warning
+          service: beamai-backend
+          alert_type: search_quality
+        annotations:
+          summary: "High zero-result rate detected for search queries"
+          description: |
+            The zero-result rate for search queries is {{ $value | humanizePercentage }},
+            which exceeds the threshold of 10%.
+            
+            Query pattern: {{ $labels.query_pattern }}
+            
+            This may indicate issues with search index, query understanding, or data quality.
+            
+            Runbook: docs/runbooks/zero_result_rate_high.md
+          runbook_url: "docs/runbooks/zero_result_rate_high.md"
+          value: "{{ $value | humanizePercentage }}"
+
+      # ========================================================================
+      # Alert 4: Database Connection Pool Exhaustion
+      # ========================================================================
+      - alert: db_pool_exhausted
+        expr: |
+          (
+            db_connection_pool_size{state="total"}
+            -
+            db_connection_pool_size{state="active"}
+          ) < 2
+        for: 2m  # Alert must persist for 2 minutes before firing
+        labels:
+          severity: critical
+          service: beamai-backend
+          alert_type: database
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: |
+            Available database connections are less than 2.
+            
+            Total connections: {{ db_connection_pool_size{state="total"} }}
+            Active connections: {{ db_connection_pool_size{state="active"} }}
+            Available connections: {{ $value }}
+            
+            This may cause request failures and service degradation.
+            
+            Runbook: docs/runbooks/db_pool_exhausted.md
+          runbook_url: "docs/runbooks/db_pool_exhausted.md"
+          value: "{{ $value }}"
+
+      # ========================================================================
+      # Alert 5: Low Cache Hit Rate (< 50%)
+      # ========================================================================
+      - alert: cache_hit_rate_low
+        expr: |
+          (
+            sum(rate(cache_hits_total[10m])) by (cache_type)
+            /
+            (
+              sum(rate(cache_hits_total[10m])) by (cache_type)
+              +
+              sum(rate(cache_misses_total[10m])) by (cache_type)
+            )
+          ) < 0.5
+        for: 10m  # Alert must persist for 10 minutes before firing
+        labels:
+          severity: warning
+          service: beamai-backend
+          alert_type: cache
+        annotations:
+          summary: "Low cache hit rate detected for {{ $labels.cache_type }} cache"
+          description: |
+            The cache hit rate for {{ $labels.cache_type }} cache is {{ $value | humanizePercentage }},
+            which is below the threshold of 50%.
+            
+            This may indicate cache invalidation issues, cache warming problems, or changing query patterns.
+            
+            Runbook: docs/runbooks/cache_hit_rate_low.md
+          runbook_url: "docs/runbooks/cache_hit_rate_low.md"
+          value: "{{ $value | humanizePercentage }}"
+
