@@ -349,9 +349,128 @@
 
 ---
 
+---
+
+## AI Integration: Phase 1 - Query Understanding (Tier 1) - Parallel Track
+
+**Note**: AI Phase 1 can be implemented in parallel with Phase 1 observability. It enhances query understanding without blocking core observability work.
+
+**Goal**: Implement AI Orchestration Layer with Tier 1 LLM agents for query understanding
+
+**Architecture Alignment**: Implements the AI Orchestration Layer pattern from `specs/AI_ARCHITECTURE.md`
+
+### Setup & Configuration
+- [ ] Set up Redis for caching (mandatory before LLM calls) - **Required for AI Phase 1**
+- [ ] Set up LLM API client (OpenAI GPT-3.5 Turbo for Tier 1)
+- [ ] Add LLM client dependencies to `requirements.txt`
+- [ ] Create AI services directory structure (`app/services/ai/`)
+
+### AI Orchestration Layer
+- [ ] Create `AIOrchestrationService` in `backend/app/services/ai/orchestration.py`
+- [ ] Implement orchestration logic to decide pipeline (search/recommend/clarify)
+- [ ] Implement confidence threshold enforcement
+- [ ] Implement fallback to deterministic systems
+- [ ] Add orchestration middleware before search execution
+
+### Intent Classification Agent (Tier 1)
+- [ ] Create `IntentClassificationAgent` (Tier 1) in `backend/app/services/ai/agents/intent.py`
+- [ ] Implement intent classification with structured JSON output
+- [ ] Implement cache-first flow (check cache → LLM → cache result)
+- [ ] Configure cache TTL (24h for intent classification)
+- [ ] Implement schema validation for intent outputs
+- [ ] Add timeout handling (fallback to keyword search)
+- [ ] Add error handling (fallback to keyword search)
+
+### Query Rewrite & Entity Extraction Agent (Tier 1)
+- [ ] Create `QueryRewriteAgent` (Tier 1) in `backend/app/services/ai/agents/rewrite.py`
+- [ ] Implement query rewriting with structured JSON output
+- [ ] Implement entity extraction (brand, category, attributes)
+- [ ] Implement cache-first flow (check cache → LLM → cache result)
+- [ ] Configure cache TTL (24h for query rewrite)
+- [ ] Implement schema validation for rewrite outputs
+- [ ] Add timeout handling (fallback to original query)
+- [ ] Add error handling (fallback to original query)
+
+### Caching Strategy
+- [ ] Implement Redis caching for intent classification results
+- [ ] Implement Redis caching for query rewrite results
+- [ ] Implement cache key generation (hash of query)
+- [ ] Implement cache invalidation strategy
+- [ ] Add cache hit/miss metrics
+
+### Integration with Search Pipeline
+- [ ] Update search endpoint to use orchestrated queries (with fallback)
+- [ ] Integrate intent classification before search
+- [ ] Integrate query rewrite before search
+- [ ] Maintain backward compatibility (keyword search still works)
+- [ ] Add feature flag for AI orchestration (enable/disable)
+
+### LLMOps Metrics
+- [ ] Add metric: `llm_requests_total{agent, model, tier}`
+- [ ] Add metric: `llm_latency_ms_bucket{agent, tier}` (histogram)
+- [ ] Add metric: `llm_cache_hit_total{agent}`
+- [ ] Add metric: `llm_cache_miss_total{agent}`
+- [ ] Add metric: `llm_errors_total{agent, reason}`
+- [ ] Add metric: `llm_schema_validation_failures_total{agent}`
+- [ ] Add metric: `llm_low_confidence_total{agent}`
+- [ ] Calculate cache hit rate: `llm_cache_hit_rate{agent}`
+
+### Circuit Breakers
+- [ ] Implement circuit breaker for LLM API calls
+- [ ] Configure failure threshold (50% error rate over 1 minute)
+- [ ] Configure open duration (30 seconds)
+- [ ] Configure half-open test traffic (10%)
+- [ ] Add circuit breaker state metrics
+- [ ] Implement automatic fallback to deterministic systems
+
+### Testing
+- [ ] Write unit tests for intent classification agent
+- [ ] Write unit tests for query rewrite agent
+- [ ] Write unit tests for AI orchestration service
+- [ ] Write unit tests for caching logic
+- [ ] Write unit tests for circuit breakers
+- [ ] Write integration tests for AI-enhanced search endpoint
+- [ ] Test fallback mechanisms (LLM timeout, error, circuit breaker open)
+- [ ] Test cache hit/miss scenarios
+- [ ] Performance test: Query understanding latency (target: p95 <80ms with cache)
+
+### A/B Testing Setup
+- [ ] Create A/B test framework for enhanced vs. baseline queries
+- [ ] Implement traffic splitting (50/50 or configurable)
+- [ ] Track experiment metrics (zero-result rate, CTR, latency)
+- [ ] Create experiment dashboard
+- [ ] Document A/B test results
+
+### Success Criteria Verification
+- [ ] Verify 15-25% reduction in zero-result searches
+- [ ] Verify 10-20% improvement in click-through rates
+- [ ] Verify query understanding latency: p95 <80ms (with caching)
+- [ ] Verify cache hit rate: >80%
+- [ ] Verify LLM error rate: <1%
+- [ ] Verify schema validation pass rate: 100%
+
+### Documentation
+- [ ] Document AI orchestration layer architecture
+- [ ] Document intent classification agent usage
+- [ ] Document query rewrite agent usage
+- [ ] Document caching strategy
+- [ ] Document circuit breaker configuration
+- [ ] Document LLMOps metrics
+- [ ] Update API documentation with AI-enhanced endpoints
+- [ ] Create developer guide for adding new AI agents
+
+### References
+- AI Phase 1 specification: `/docs/AI_strategy_memo.md` (Phase 1: Query Understanding)
+- AI Architecture: `/specs/AI_ARCHITECTURE.md`
+- Phase 1 specification: `/docs/implementation_phases.md`
+
+---
+
 ## References
 
 - Phase 1 specification: `/docs/implementation_phases.md`
 - Observability spec: `/specs/OBSERVABILITY.md`
 - Architecture: `/specs/ARCHITECTURE.md`
+- **AI Strategy Memo**: `/docs/AI_strategy_memo.md`
+- **AI Architecture**: `/specs/AI_ARCHITECTURE.md`
 

@@ -1,491 +1,456 @@
-# Phase 3: Advanced Search & ML Features - TODO Checklist
+# Phase 3: Performance & Resilience - TODO Checklist
 
-**Goal**: Implement semantic search and collaborative filtering.
+**Goal**: Improve performance and handle failures gracefully. Critical before scaling.
 
-**Timeline**: Weeks 9-14
+**Timeline**: Weeks 11-16
 
 **Status**: 
-- ✅ **3.1 Semantic Search (FAISS)**: Core implementation COMPLETE
-- ⏳ **3.2 Collaborative Filtering**: NOT IMPLEMENTED
-- ⏳ **3.3 Feature Store**: NOT IMPLEMENTED
-- ⏳ **3.4 Query Enhancement**: NOT IMPLEMENTED
+- ⏳ **3.1 Redis Caching Layer**: NOT IMPLEMENTED
+- ⏳ **3.2 Rate Limiting**: NOT IMPLEMENTED
+- ⏳ **3.3 Circuit Breakers**: NOT IMPLEMENTED
+- ⏳ **3.4 Database Optimization**: NOT IMPLEMENTED
+- ⏳ **3.5 Async/Await Optimization**: NOT IMPLEMENTED
+
+**Dependencies**: 
+- Phase 1.1 Structured Logging (for cache operation logging)
+- Phase 1.2 Metrics Collection (for cache hit rate metrics)
+- Phase 2.1 Semantic Search (for FAISS circuit breaker)
 
 ---
 
-## 3.1 Semantic Search (FAISS)
-
-**Status**: ✅ **Core implementation complete**. 
-
-**Implemented**:
-- FAISS index building and loading
-- SentenceTransformers embedding generation
-- Semantic search query processing
-- Hybrid search integration (keyword + semantic)
-- Graceful fallback to keyword-only search
-- Prometheus metrics for semantic search
-- Memory usage monitoring
-- Health check endpoint integration
-
-**Remaining items** (optional enhancements):
-- Automated index rebuild pipeline (weekly batch job)
-- Hot-reloading of index (without restart)
-- Query embedding caching (for repeated queries)
+## 3.1 Redis Caching Layer
 
 ### Setup & Configuration
-- [x] Install FAISS library (`faiss-cpu` or `faiss-gpu`)
-- [x] Install SentenceTransformers library
-- [x] Add FAISS and SentenceTransformers to `requirements.txt`
-- [x] Create semantic search service module (`app/services/search/semantic.py`)
-- [x] Configure embedding model (`all-MiniLM-L6-v2` or `all-mpnet-base-v2`)
-- [x] Determine embedding dimensions (384 or 768)
+- [ ] Install Redis client library (`redis` or `aioredis`)
+- [ ] Add Redis client to `requirements.txt`
+- [ ] Set up Redis instance (standalone or cluster)
+- [ ] Create Redis client wrapper module (`app/core/cache.py`)
+- [ ] Configure connection pooling
+- [ ] Configure connection timeout and retry logic
+- [ ] Add Redis connection health check
 
-### Embedding Generation
-- [x] Create embedding generation script/function
-- [x] Load SentenceTransformers model
-- [x] Generate embeddings for product descriptions
-- [x] Batch process embeddings for all products
-- [x] Store embeddings in temporary storage (for index building)
-- [x] Handle missing or empty product descriptions
-- [x] Add embedding generation to batch job pipeline
+### Multi-Level Caching Strategy
 
-### Index Building
-- [x] Create FAISS index builder script (`scripts/build_faiss_index.py`)
-- [x] Choose index type (`IndexIVFFlat` or `IndexHNSW`)
-- [x] Configure index parameters (nlist, nprobe for IVFFlat; M, ef_construction for HNSW)
-- [x] Build FAISS index from product embeddings
-- [x] Save index to disk (with versioning)
-- [x] Create index metadata file (product_id mapping, index version, build date)
-- [x] Add index validation (verify all products are indexed)
-- [ ] Create index rebuild pipeline (weekly batch job)
+#### Layer 1: Query Result Cache
+- [ ] Design cache key format: `search:{query_hash}:{user_id}:{k}`
+- [ ] Design cache key format: `recommend:{user_id}:{category}:{k}`
+- [ ] Implement result serialization (JSON)
+- [ ] Implement cache storage (TTL: 5 minutes)
+- [ ] Implement cache retrieval
+- [ ] Add cache invalidation on product updates
+- [ ] Add cache invalidation on ranking weight changes
+- [ ] Add manual cache invalidation endpoint (admin)
 
-### Index Loading & Management
-- [x] Create index loader service
-- [x] Load FAISS index in memory on application startup
-- [x] Implement index version checking
-- [x] Handle index loading failures gracefully
-- [ ] Support hot-reloading of index (without restart)
-- [x] Monitor index memory usage
-- [x] Add index health check endpoint
+#### Layer 2: Feature Cache
+- [ ] Design cache key format: `feature:{product_id}:{feature_name}`
+- [ ] Design cache key format: `feature:{user_id}:{feature_name}`
+- [ ] Implement feature value storage (TTL: 1 hour for products, 24 hours for users)
+- [ ] Implement feature value retrieval
+- [ ] Add cache invalidation on product updates
+- [ ] Add cache invalidation on user events (after batch job)
 
-### Query Processing
-- [x] Create query embedding function
-- [x] Generate query embedding on-the-fly for search requests
-- [x] Implement FAISS index search (top-K candidates)
-- [x] Calculate cosine similarity scores
-- [x] Return `search_semantic_score` for each result
-- [x] Handle empty query or invalid input
-- [ ] Add query embedding caching (optional, for repeated queries)
+#### Layer 3: Ranking Configuration Cache
+- [ ] Design cache key format: `ranking:weights:{category}`
+- [ ] Design cache key format: `ranking:config:global`
+- [ ] Implement ranking weight storage (TTL: 1 day)
+- [ ] Implement ranking weight retrieval
+- [ ] Add cache invalidation on weight updates
+- [ ] Add manual refresh endpoint
 
-### Hybrid Search Integration
-- [x] Create hybrid search service
-- [x] Combine keyword and semantic search results
-- [x] Implement result merging logic
-- [x] Use `max(keyword_score, semantic_score)` per RANKING_LOGIC.md
-- [x] Handle cases where one search type fails
-- [x] Add hybrid search metrics (keyword vs semantic result counts)
-- [ ] Test hybrid search with various query types
+#### Layer 4: Popular Products Cache
+- [ ] Design cache key format: `popular:{category}:{k}`
+- [ ] Design cache key format: `popular:global:{k}`
+- [ ] Implement popular products storage (TTL: 5 minutes)
+- [ ] Implement popular products retrieval
+- [ ] Add cache invalidation on popularity score updates
 
-### Fallback Mechanisms
-- [x] Implement fallback to keyword-only if FAISS index fails
-- [x] Implement fallback if embedding generation fails
-- [ ] Add circuit breaker for semantic search service
-- [x] Log fallback events for monitoring
-- [x] Ensure graceful degradation
+### Circuit Breaker Pattern
+- [ ] Implement circuit breaker for Redis failures
+- [ ] Configure failure threshold (5 consecutive failures)
+- [ ] Implement bypass cache on circuit breaker open
+- [ ] Add circuit breaker state metrics
+- [ ] Log circuit breaker state changes
+- [ ] Implement automatic recovery (test connection after 30 seconds)
 
-### Integration with Search Endpoint
-- [x] Integrate semantic search into search endpoint
-- [x] Add semantic search as optional parameter
-- [x] Update search response to include semantic scores
-- [x] Maintain backward compatibility (keyword-only still works)
-- [x] Add feature flag for semantic search (enable/disable)
-- [x] Update API documentation
+### Cache Warming
+- [ ] Identify popular queries for cache warming
+- [ ] Create cache warming script
+- [ ] Implement cache warming on application startup
+- [ ] Schedule periodic cache warming (every 5 minutes)
+- [ ] Add cache warming metrics
+
+### Cache Invalidation
+- [ ] Implement product update event handler
+- [ ] Invalidate query result cache on product updates
+- [ ] Invalidate feature cache on product updates
+- [ ] Invalidate popular products cache on popularity updates
+- [ ] Add cache invalidation metrics
+- [ ] Log cache invalidation events
+
+### Integration
+- [ ] Create cache decorator for search endpoint
+- [ ] Create cache decorator for recommendation endpoint
+- [ ] Integrate cache into search service
+- [ ] Integrate cache into recommendation service
+- [ ] Integrate cache into ranking service (for weights)
+- [ ] Integrate cache into feature service
+- [ ] Add feature flag for caching (enable/disable)
 
 ### Testing
-- [x] Write unit tests for embedding generation
-- [x] Write unit tests for index building
-- [x] Write unit tests for query processing
-- [x] Write unit tests for hybrid search merging
-- [x] Write integration tests for semantic search endpoint
-- [x] Test with various query types (conceptual, specific, misspelled)
-- [x] Test fallback mechanisms
-- [x] Performance test: embedding generation latency
-- [x] Performance test: FAISS search latency
-- [x] Verify semantic search returns relevant results for conceptual queries
-- [x] Write unit tests for metrics collection
-- [x] Write unit tests for memory usage calculation
-- [x] Write integration tests for health check endpoint
-- [x] Write integration tests for metrics endpoint
+- [ ] Write unit tests for Redis client wrapper
+- [ ] Write unit tests for cache key generation
+- [ ] Write unit tests for cache storage/retrieval
+- [ ] Write unit tests for cache invalidation
+- [ ] Write unit tests for circuit breaker
+- [ ] Write integration tests for cached search endpoint
+- [ ] Write integration tests for cached recommendation endpoint
+- [ ] Test cache hit scenarios
+- [ ] Test cache miss scenarios
+- [ ] Test cache invalidation scenarios
+- [ ] Test circuit breaker (simulate Redis failures)
+- [ ] Performance test: Cache hit latency
+- [ ] Performance test: Cache miss latency
 
 ### Monitoring & Metrics
-- [x] Add metrics: semantic search request count
-- [x] Add metrics: semantic search latency (p50, p95, p99) - Prometheus histogram implemented
-- [x] Add metrics: embedding generation latency
-- [x] Add metrics: FAISS index search latency
-- [x] Add metrics: hybrid search result distribution
-- [x] Add metrics: fallback usage count
-- [x] Log semantic search queries and results
-- [x] Track semantic vs keyword result overlap
+- [ ] Add metric: `cache_hits_total{cache_type, cache_layer}`
+- [ ] Add metric: `cache_misses_total{cache_type, cache_layer}`
+- [ ] Add metric: `cache_hit_rate{cache_type, cache_layer}` (calculated)
+- [ ] Add metric: `cache_operation_latency_seconds{cache_type, operation}`
+- [ ] Add metric: `cache_invalidations_total{cache_type, reason}`
+- [ ] Add metric: `cache_circuit_breaker_state{cache_type}` (0=closed, 1=open, 2=half-open)
+- [ ] Add Grafana dashboard for cache performance
+- [ ] Log cache operations (hit/miss/invalidation)
+
+### Success Criteria
+- [ ] Cache hit rate > 70% for popular queries
+- [ ] Cache operation latency < 5ms (p95)
+- [ ] Circuit breaker prevents cascading failures
+- [ ] Cache invalidation works correctly
+- [ ] Cache warming improves initial performance
 
 ---
 
-## 3.2 Collaborative Filtering
+## 3.2 Rate Limiting
 
 ### Setup & Configuration
-- [ ] Install `implicit` library (Implicit ALS)
-- [ ] Install additional dependencies (numpy, scipy)
-- [ ] Add implicit and dependencies to `requirements.txt`
-- [ ] Create collaborative filtering service module (`app/services/recommendation/collaborative.py`)
-- [ ] Configure model parameters (factors, regularization, iterations)
+- [ ] Install rate limiting library (or implement custom)
+- [ ] Create rate limiting middleware (`app/core/rate_limit.py`)
+- [ ] Configure Redis for rate limiting counters
+- [ ] Set up rate limit configuration per endpoint
 
-### Data Preparation
-- [ ] Create data extraction script for user-product interactions
-- [ ] Query events table for user-product interaction matrix
-- [ ] Aggregate interactions by type (view, click, purchase) with weights
-- [ ] Handle implicit feedback (views, clicks) vs explicit (ratings)
-- [ ] Create sparse matrix representation (CSR format)
-- [ ] Add data validation (check for empty matrix, minimum interactions)
-- [ ] Create data preprocessing pipeline
+### Per-IP Rate Limiting
+- [ ] Implement sliding window counter for IP addresses
+- [ ] Configure search endpoint: 100 requests/minute (burst: 150)
+- [ ] Configure recommendation endpoint: 50 requests/minute (burst: 75)
+- [ ] Implement burst handling (allow short spikes)
+- [ ] Extract IP address from request headers (X-Forwarded-For)
+- [ ] Handle IPv4 and IPv6 addresses
 
-### Model Training (Offline)
-- [ ] Create training script (`scripts/train_cf_model.py`)
-- [ ] Implement Implicit ALS model training
-- [ ] Configure hyperparameters (factors, regularization, iterations, alpha)
-- [ ] Add cross-validation for hyperparameter tuning
-- [ ] Save model artifacts (user factors, item factors)
-- [ ] Save model metadata (training date, parameters, metrics)
-- [ ] Create nightly batch job for model training
-- [ ] Add model versioning
-- [ ] Handle training failures gracefully
+### Per-API-Key Rate Limiting
+- [ ] Implement sliding window counter for API keys
+- [ ] Configure search endpoint: 1000 requests/minute per key
+- [ ] Configure recommendation endpoint: 500 requests/minute per key
+- [ ] Extract API key from Authorization header
+- [ ] Validate API key before rate limiting check
+- [ ] Handle missing API key (fallback to IP rate limiting)
 
-### Model Artifact Storage
-- [ ] Set up model artifact storage (S3-compatible or local filesystem)
-- [ ] Create model registry structure
-- [ ] Implement model versioning system
-- [ ] Store model metadata (training metrics, parameters, date)
-- [ ] Create model loading service
-- [ ] Add model validation on load
-- [ ] Implement model rollback capability
+### Abuse Detection
+- [ ] Implement same query detection (>20 times/minute)
+- [ ] Implement sequential product_id enumeration detection
+- [ ] Add abuse flagging mechanism
+- [ ] Implement automatic throttling for abusive patterns
+- [ ] Log abuse detection events
+- [ ] Add metrics for abuse detection
 
-### Model Scoring (Online)
-- [ ] Create CF scoring service
-- [ ] Load model artifacts (user/item factors) on startup
-- [ ] Implement `user_product_affinity` score calculation
-- [ ] Compute scores for candidate products
-- [ ] Cache user factors in Redis (TTL: 24 hours)
-- [ ] Handle missing users (cold start)
-- [ ] Handle missing products (cold start)
-- [ ] Optimize scoring for batch requests
+### Response Handling
+- [ ] Return `429 Too Many Requests` status code
+- [ ] Add `Retry-After` header with seconds until retry
+- [ ] Add rate limit headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+- [ ] Return error message in response body
+- [ ] Log rate limit violations
 
-### Cold Start Handling
-- [ ] Implement new user handling (use popularity-based recommendations)
-- [ ] Implement new product handling (use content-based/embedding similarity)
-- [ ] Create transition logic: After 5 interactions, use CF scores
-- [ ] Track user interaction count
-- [ ] Blend CF scores with popularity scores during transition
-- [ ] Add cold start metrics (new user count, new product count)
-
-### Integration with Recommendation Endpoint
-- [ ] Integrate CF scoring into recommendation endpoint
-- [ ] Combine CF scores with existing ranking features
-- [ ] Add CF as optional feature (feature flag)
-- [ ] Update recommendation response to include CF scores
-- [ ] Maintain backward compatibility
-- [ ] Update API documentation
-
-### A/B Testing Setup
-- [ ] Create A/B test framework for CF vs popularity baseline
-- [ ] Implement traffic splitting (50/50 or configurable)
-- [ ] Track experiment metrics (CTR, CVR, engagement)
-- [ ] Create experiment dashboard
-- [ ] Add statistical analysis tools
-- [ ] Document A/B test results
+### Admin Endpoints
+- [ ] Create admin endpoint: `POST /admin/rate-limit/whitelist` (add IP to whitelist)
+- [ ] Create admin endpoint: `POST /admin/rate-limit/blacklist` (add IP to blacklist)
+- [ ] Create admin endpoint: `GET /admin/rate-limit/status` (view rate limit status)
+- [ ] Add authentication/authorization for admin endpoints
+- [ ] Implement IP whitelist/blacklist storage (Redis)
 
 ### Testing
-- [ ] Write unit tests for data preparation
-- [ ] Write unit tests for model training
-- [ ] Write unit tests for CF scoring
-- [ ] Write unit tests for cold start handling
-- [ ] Write integration tests for recommendation endpoint with CF
-- [ ] Test with sparse interaction matrix
-- [ ] Test with new users (cold start)
-- [ ] Test with new products (cold start)
-- [ ] Verify CF recommendations show personalization (different users get different results)
-- [ ] Performance test: CF scoring latency
+- [ ] Write unit tests for rate limiting logic
+- [ ] Write unit tests for sliding window counter
+- [ ] Write unit tests for abuse detection
+- [ ] Write integration tests for rate limiting middleware
+- [ ] Test per-IP rate limiting
+- [ ] Test per-API-key rate limiting
+- [ ] Test abuse detection
+- [ ] Test rate limit response headers
+- [ ] Test whitelist/blacklist functionality
+- [ ] Load test: Verify rate limiting doesn't impact legitimate traffic
 
 ### Monitoring & Metrics
-- [ ] Add metrics: CF recommendation request count
-- [ ] Add metrics: CF scoring latency
-- [ ] Add metrics: model training duration
-- [ ] Add metrics: cold start usage count
-- [ ] Add metrics: A/B test metrics (CTR, CVR)
-- [ ] Track model performance over time
-- [ ] Log CF recommendations and scores
-- [ ] Monitor model staleness (time since last training)
+- [ ] Add metric: `rate_limit_hits_total{endpoint, type}` (IP or API key)
+- [ ] Add metric: `rate_limit_abuse_detected_total{pattern}`
+- [ ] Add metric: `rate_limit_whitelist_size`
+- [ ] Add metric: `rate_limit_blacklist_size`
+- [ ] Add Grafana dashboard for rate limiting
+- [ ] Log rate limit violations
+
+### Success Criteria
+- [ ] Rate limiting prevents abuse (same query >20 times/minute blocked)
+- [ ] Rate limiting doesn't impact legitimate users
+- [ ] Admin endpoints allow IP management
+- [ ] Rate limit metrics are tracked correctly
 
 ---
 
-## 3.3 Feature Store
+## 3.3 Circuit Breakers
 
 ### Setup & Configuration
-- [ ] Create feature store service module (`app/services/features/store.py`)
-- [ ] Design feature store architecture
-- [ ] Set up Redis for online features
-- [ ] Set up Postgres/Parquet for offline features
-- [ ] Create feature store configuration
+- [ ] Install circuit breaker library (`pybreaker` or custom implementation)
+- [ ] Create circuit breaker module (`app/core/circuit_breaker.py`)
+- [ ] Configure circuit breaker parameters:
+  - [ ] Failure threshold: 50% error rate over 1 minute
+  - [ ] Open duration: 30 seconds
+  - [ ] Half-open test traffic: 10%
 
-### Feature Registry
-- [ ] Review existing features in FEATURE_DEFINITIONS.md
-- [ ] Create feature registry data structure
-- [ ] Document all features with metadata:
-  - [ ] Feature name
-  - [ ] Feature type (online/offline)
-  - [ ] Feature version
-  - [ ] Feature description
-  - [ ] Feature computation logic
-  - [ ] Feature lineage (dependencies)
-- [ ] Implement feature versioning system
-- [ ] Create feature registry API/interface
-- [ ] Add feature discovery capabilities
+### Database Circuit Breaker
+- [ ] Implement circuit breaker for database connections
+- [ ] Monitor database query failures
+- [ ] Open circuit on high error rate
+- [ ] Implement fallback: Return cached results or 503
+- [ ] Add circuit breaker state metrics
+- [ ] Log circuit breaker state changes
 
-### Feature Storage - Online Features
-- [ ] Design Redis schema for online features
-- [ ] Implement feature storage in Redis
-- [ ] Set appropriate TTLs for cached features
-- [ ] Implement feature batch storage
-- [ ] Add feature invalidation logic
-- [ ] Handle Redis failures gracefully
+### Redis Circuit Breaker
+- [ ] Implement circuit breaker for Redis connections
+- [ ] Monitor Redis operation failures
+- [ ] Open circuit on high error rate
+- [ ] Implement fallback: Direct database queries (slower)
+- [ ] Add circuit breaker state metrics
+- [ ] Log circuit breaker state changes
 
-### Feature Storage - Offline Features
-- [ ] Design Postgres schema for offline features (or Parquet structure)
-- [ ] Implement feature storage in Postgres/Parquet
-- [ ] Create feature snapshot capability
-- [ ] Implement feature backfill functionality
-- [ ] Add feature versioning in offline storage
+### FAISS Circuit Breaker
+- [ ] Implement circuit breaker for FAISS index operations
+- [ ] Monitor FAISS search failures
+- [ ] Open circuit on high error rate
+- [ ] Implement fallback: Keyword search only
+- [ ] Add circuit breaker state metrics
+- [ ] Log circuit breaker state changes
 
-### Feature Serving API
-- [ ] Create feature fetching API by product_id
-- [ ] Create feature fetching API by user_id
-- [ ] Implement batch feature fetching (reduce N+1 queries)
-- [ ] Add feature caching layer
-- [ ] Implement feature fallback (compute if not in store)
-- [ ] Add feature fetching metrics
-- [ ] Optimize feature fetching performance
-
-### Feature Migration
-- [ ] Identify existing features to migrate
-- [ ] Create migration plan
-- [ ] Migrate popularity_score to feature store
-- [ ] Migrate freshness_score to feature store
-- [ ] Migrate user_category_affinity to feature store
-- [ ] Update all feature consumers to use feature store
-- [ ] Verify feature consistency after migration
-- [ ] Remove duplicate feature computation code
-
-### Feature Versioning Strategy
-- [ ] Define feature versioning scheme
-- [ ] Implement version tracking
-- [ ] Create feature deprecation process
-- [ ] Add feature version migration tools
-- [ ] Document versioning best practices
+### Health Check Endpoints
+- [ ] Create health check endpoint: `GET /health`
+- [ ] Create detailed health check: `GET /health/detailed`
+- [ ] Check database connectivity
+- [ ] Check Redis connectivity
+- [ ] Check FAISS index availability
+- [ ] Return health status per service
+- [ ] Return circuit breaker state per service
 
 ### Testing
-- [ ] Write unit tests for feature registry
-- [ ] Write unit tests for feature storage (online)
-- [ ] Write unit tests for feature storage (offline)
-- [ ] Write unit tests for feature serving API
-- [ ] Write integration tests for feature store
-- [ ] Test feature migration process
-- [ ] Test feature versioning
-- [ ] Performance test: feature fetching latency
-- [ ] Verify feature store reduces feature computation duplication
+- [ ] Write unit tests for circuit breaker logic
+- [ ] Write unit tests for failure threshold detection
+- [ ] Write unit tests for half-open state
+- [ ] Write integration tests for database circuit breaker
+- [ ] Write integration tests for Redis circuit breaker
+- [ ] Write integration tests for FAISS circuit breaker
+- [ ] Test circuit breaker opens on high error rate
+- [ ] Test circuit breaker closes after recovery
+- [ ] Test fallback mechanisms
+- [ ] Test health check endpoints
 
 ### Monitoring & Metrics
-- [ ] Add metrics: feature store request count
-- [ ] Add metrics: feature fetching latency
-- [ ] Add metrics: feature cache hit rate
-- [ ] Add metrics: feature computation count (fallback)
-- [ ] Track feature usage statistics
-- [ ] Monitor feature store storage usage
-- [ ] Log feature access patterns
+- [ ] Add metric: `circuit_breaker_state{service}` (0=closed, 1=open, 2=half-open)
+- [ ] Add metric: `circuit_breaker_failures_total{service}`
+- [ ] Add metric: `circuit_breaker_opens_total{service}`
+- [ ] Add metric: `circuit_breaker_closes_total{service}`
+- [ ] Add Grafana dashboard for circuit breakers
+- [ ] Log circuit breaker state changes
+
+### Success Criteria
+- [ ] Circuit breakers prevent cascading failures
+- [ ] Fallback mechanisms work correctly
+- [ ] Health check endpoints report accurate status
+- [ ] Circuit breaker metrics are tracked correctly
 
 ---
 
-## 3.4 Query Enhancement
+## 3.4 Database Optimization
 
-### Setup & Configuration
-- [ ] Install spell correction library (SymSpell or similar)
-- [ ] Add spell correction library to `requirements.txt`
-- [ ] Create query enhancement service module (`app/services/search/query_enhancement.py`)
-- [ ] Create synonym dictionary structure
-- [ ] Set up query classification logic
+### Connection Pooling
+- [ ] Install async database client (`asyncpg` or `psycopg2`)
+- [ ] Create database connection pool module (`app/core/database.py`)
+- [ ] Configure connection pool size: 20 connections
+- [ ] Configure max overflow: 10 connections
+- [ ] Configure connection timeout
+- [ ] Configure connection retry logic
+- [ ] Add connection pool metrics
 
-### Spell Correction
-- [ ] Integrate SymSpell or similar spell correction library
-- [ ] Build dictionary from product names and descriptions
-- [ ] Configure confidence threshold (>80%)
-- [ ] Implement spell correction function
-- [ ] Handle common misspellings
-- [ ] Add spell correction to query preprocessing pipeline
-- [ ] Log spell corrections for analysis
-- [ ] Add metrics: spell correction usage count
+### Read Replicas
+- [ ] Set up database read replicas (2-3 replicas)
+- [ ] Create read/write splitting logic
+- [ ] Route read queries (search, recommendations) to replicas
+- [ ] Route write queries (events) to primary
+- [ ] Implement replica selection (round-robin or least lag)
+- [ ] Monitor replication lag
+- [ ] Alert if replication lag >60 seconds
+- [ ] Add read replica metrics
 
-### Synonym Expansion
-- [ ] Create synonym dictionary data structure
-- [ ] Populate synonym dictionary with common synonyms
-- [ ] Add domain-specific synonyms (e.g., "sneakers" → ["running shoes", "trainers"])
-- [ ] Implement synonym expansion function
-- [ ] Expand query before search
-- [ ] Handle multi-word synonyms
-- [ ] Add synonym dictionary management (CRUD operations)
-- [ ] Create synonym dictionary update process
-- [ ] Add metrics: synonym expansion usage count
-
-### Query Classification
-- [ ] Implement query classification logic
-- [ ] Classify queries as:
-  - [ ] Navigational (specific product search)
-  - [ ] Informational (general information search)
-  - [ ] Transactional (purchase intent)
-- [ ] Create classification rules/heuristics
-- [ ] Add classification to query processing
-- [ ] Use classification to adjust ranking (future)
-- [ ] Log query classifications for analysis
-- [ ] Add metrics: query classification distribution
-
-### Query Normalization
-- [ ] Create query normalization service
-- [ ] Implement lowercase conversion
-- [ ] Implement whitespace normalization
-- [ ] Remove special characters (if appropriate)
-- [ ] Handle unicode normalization
-- [ ] Add query length limits
-- [ ] Validate query format
-- [ ] Add query normalization to preprocessing pipeline
-
-### Intent Extraction (Future/Optional)
-- [ ] Research NER (Named Entity Recognition) libraries
-- [ ] Implement brand extraction
-- [ ] Implement category extraction
-- [ ] Implement attribute extraction
-- [ ] Use extracted entities to boost matching results
-- [ ] Add intent extraction to query processing
-
-### Integration with Search Endpoint
-- [ ] Integrate query enhancement into search endpoint
-- [ ] Apply query preprocessing before search
-- [ ] Make enhancement optional (feature flag)
-- [ ] Maintain original query for logging
-- [ ] Return enhanced query in response (for transparency)
-- [ ] Update API documentation
+### Query Optimization
+- [ ] Analyze slow queries using EXPLAIN ANALYZE
+- [ ] Add database indexes for common queries:
+  - [ ] Index on `products.category`
+  - [ ] Index on `products.popularity_score`
+  - [ ] Index on `events.user_id, events.product_id`
+  - [ ] Index on `events.timestamp`
+- [ ] Optimize N+1 query patterns
+- [ ] Implement batch feature fetching
+- [ ] Add query performance metrics
+- [ ] Implement slow query logging (>100ms)
 
 ### Testing
-- [ ] Write unit tests for spell correction
-- [ ] Write unit tests for synonym expansion
-- [ ] Write unit tests for query classification
-- [ ] Write unit tests for query normalization
-- [ ] Write integration tests for query enhancement pipeline
-- [ ] Test with various query types
-- [ ] Test spell correction accuracy
-- [ ] Test synonym expansion correctness
-- [ ] Verify query enhancement improves zero-result rate
-- [ ] Performance test: query enhancement latency
+- [ ] Write unit tests for connection pooling
+- [ ] Write unit tests for read/write splitting
+- [ ] Write integration tests for database queries
+- [ ] Test connection pool exhaustion handling
+- [ ] Test read replica failover
+- [ ] Test query performance improvements
+- [ ] Load test: Verify connection pool handles concurrent requests
 
 ### Monitoring & Metrics
-- [ ] Add metrics: query enhancement usage count
-- [ ] Add metrics: spell correction count
-- [ ] Add metrics: synonym expansion count
-- [ ] Add metrics: query classification distribution
-- [ ] Track zero-result rate before/after enhancement
-- [ ] Track search result quality improvements
-- [ ] Log query enhancement transformations
-- [ ] Monitor query expansion impact on results
+- [ ] Add metric: `db_connection_pool_size{state}` (active, idle, waiting)
+- [ ] Add metric: `db_query_duration_seconds{query_type}`
+- [ ] Add metric: `db_slow_queries_total{query_type}`
+- [ ] Add metric: `db_replication_lag_seconds{replica}`
+- [ ] Add Grafana dashboard for database health
+- [ ] Log slow queries
+
+### Success Criteria
+- [ ] Database connection pool never exhausted
+- [ ] Read queries routed to replicas
+- [ ] Query performance improved (p95 <100ms)
+- [ ] Slow queries identified and optimized
+
+---
+
+## 3.5 Async/Await Optimization
+
+### Async Database Client
+- [ ] Convert database queries to async (use `asyncpg`)
+- [ ] Update database service to async
+- [ ] Update all database query functions to async
+- [ ] Test async database queries
+
+### Async Ranking Service
+- [ ] Convert ranking service to async
+- [ ] Update ranking functions to async
+- [ ] Test async ranking operations
+
+### Parallel Operations
+- [ ] Parallelize feature fetching (fetch multiple features concurrently)
+- [ ] Parallelize cache lookups (check multiple cache keys concurrently)
+- [ ] Parallelize independent database queries
+- [ ] Use `asyncio.gather` for concurrent operations
+- [ ] Test parallel operations
+
+### Performance Testing
+- [ ] Benchmark synchronous vs asynchronous performance
+- [ ] Measure throughput improvement (target: 2x)
+- [ ] Measure latency improvement
+- [ ] Load test: Verify async handles concurrent requests better
+
+### Testing
+- [ ] Write unit tests for async database client
+- [ ] Write unit tests for async ranking service
+- [ ] Write integration tests for parallel operations
+- [ ] Test async error handling
+- [ ] Test async timeout handling
+
+### Monitoring & Metrics
+- [ ] Add metric: `async_operation_duration_seconds{operation_type}`
+- [ ] Add metric: `async_throughput_requests_per_second`
+- [ ] Compare async vs sync performance metrics
+- [ ] Add Grafana dashboard for async performance
+
+### Success Criteria
+- [ ] Throughput improved by 2x (compared to synchronous)
+- [ ] Latency improved (p95 <200ms with cache)
+- [ ] Async operations handle concurrent requests correctly
+- [ ] No performance regressions
 
 ---
 
 ## Success Criteria Verification
 
-### Semantic search returns relevant results for conceptual queries
-- [ ] Test semantic search with conceptual queries (e.g., "comfortable shoes for running")
-- [ ] Verify results are relevant and match intent
-- [ ] Compare semantic vs keyword-only results
-- [ ] Measure relevance metrics (NDCG, precision@K)
+### Cache hit rate > 70% for popular queries
+- [ ] Measure cache hit rate for popular queries
+- [ ] Verify cache hit rate > 70%
+- [ ] Optimize cache warming if needed
 
-### CF recommendations show personalization
-- [ ] Test CF recommendations for different users
-- [ ] Verify different users get different results
-- [ ] Measure personalization metrics (diversity, novelty)
-- [ ] Compare CF vs popularity-based recommendations
+### p95 latency < 200ms (with cache)
+- [ ] Measure p95 latency with caching enabled
+- [ ] Verify p95 latency < 200ms
+- [ ] Optimize cache operations if needed
 
-### Feature store reduces feature computation duplication
-- [ ] Measure feature computation calls before feature store
-- [ ] Measure feature computation calls after feature store
-- [ ] Verify reduction in duplicate computations
-- [ ] Track feature store cache hit rate
+### Circuit breakers prevent cascading failures
+- [ ] Simulate database failure → verify circuit breaker opens
+- [ ] Simulate Redis failure → verify circuit breaker opens
+- [ ] Verify fallback mechanisms work
+- [ ] Verify system continues operating with degraded performance
 
-### Query enhancement improves zero-result rate
-- [ ] Measure zero-result rate before query enhancement
-- [ ] Measure zero-result rate after query enhancement
-- [ ] Verify improvement in zero-result rate
-- [ ] Track query enhancement impact on search quality
+### Rate limiting prevents abuse
+- [ ] Test same query >20 times/minute → verify throttling
+- [ ] Test sequential product_id enumeration → verify blocking
+- [ ] Verify legitimate users not impacted
+
+### Database connection pool never exhausted
+- [ ] Load test: Verify connection pool handles concurrent requests
+- [ ] Monitor connection pool metrics
+- [ ] Verify no connection pool exhaustion errors
 
 ---
 
 ## Documentation
 
-- [x] Document semantic search implementation and usage
-- [x] Document FAISS index building and management
-- [ ] Document collaborative filtering model training and serving
-- [ ] Document feature store architecture and usage
-- [ ] Document query enhancement features
-- [x] Update FEATURE_DEFINITIONS.md with new features (product_embedding feature documented)
-- [ ] Update RANKING_LOGIC.md if ranking changes
-- [x] Update API documentation with new endpoints/parameters
-- [ ] Create developer guide for adding new ML features
-- [ ] Document model deployment process
+- [ ] Document Redis caching strategy
+- [ ] Document rate limiting configuration
+- [ ] Document circuit breaker configuration
+- [ ] Document database optimization strategies
+- [ ] Document async/await patterns
+- [ ] Update architecture documentation
+- [ ] Create developer guide for adding new cache layers
 
 ---
 
 ## Integration & Testing
 
-- [x] Integration test: End-to-end semantic search flow
-  - [x] Verify embedding generation
-  - [x] Verify FAISS index search
-  - [x] Verify hybrid search merging
-  - [x] Verify results are returned correctly
-- [ ] Integration test: End-to-end collaborative filtering flow
-  - [ ] Verify model training
-  - [ ] Verify model loading
-  - [ ] Verify CF scoring
-  - [ ] Verify recommendations include CF scores
-- [ ] Integration test: Feature store end-to-end
-  - [ ] Verify feature storage
-  - [ ] Verify feature fetching
-  - [ ] Verify feature migration
-- [ ] Integration test: Query enhancement end-to-end
-  - [ ] Verify query preprocessing
-  - [ ] Verify enhanced query improves results
-- [ ] Load test: Verify ML features don't impact performance significantly
-- [ ] Test ML features resilience (what happens if model fails to load?)
+- [ ] Integration test: End-to-end cached search flow
+- [ ] Integration test: End-to-end rate-limited request flow
+- [ ] Integration test: Circuit breaker with fallback
+- [ ] Integration test: Database read/write splitting
+- [ ] Load test: Verify performance improvements
+- [ ] Test resilience: Simulate failures and verify graceful degradation
 
 ---
 
 ## Notes
 
-- Semantic search and collaborative filtering can be implemented in parallel
-- Feature store should be implemented early to support other features
-- Query enhancement can be implemented incrementally (spell correction → synonyms → classification)
+- Caching is critical for performance - implement early
+- Rate limiting prevents abuse and protects system
+- Circuit breakers prevent cascading failures
+- Database optimization reduces latency
+- Async/await improves throughput
 - Test each component independently before integration
-- Monitor model performance and retrain as needed
+- Monitor all performance metrics
 - Document any deviations from the plan
-- Consider model versioning and rollback strategies from the start
 
 ---
 
 ## References
 
-- Phase 3 specification: `/docs/TODO/implementation_phases.md`
-- Feature definitions: `/specs/FEATURE_DEFINITIONS.md`
-- Ranking logic: `/specs/RANKING_LOGIC.md`
-- Search design: `/specs/SEARCH_DESIGN.md`
-- Recommendation design: `/specs/RECOMMENDATION_DESIGN.md`
+- Phase 3 specification: `/docs/TODO/implementation_plan.md` (Phase 3: Performance & Resilience)
+- Caching strategy: `/specs/CACHING_STRATEGY.md`
+- Architecture: `/specs/ARCHITECTURE.md`
+- API contracts: `/specs/API_CONTRACTS.md`
+- Observability: `/specs/OBSERVABILITY.md`
 
