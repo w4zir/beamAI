@@ -128,8 +128,14 @@ def test_search_tracks_request_metrics(semantic_service_with_index):
     """Test that search tracks request count and latency metrics."""
     # Get initial values
     initial_requests = semantic_search_requests_total._value.get()
-    initial_latency_samples = len(list(semantic_search_latency_seconds.collect()[0].samples))
-    initial_faiss_samples = len(list(semantic_faiss_search_latency_seconds.collect()[0].samples))
+    
+    # Get initial observation counts from histograms
+    # Histograms track observations in a _count sample
+    initial_latency_samples = semantic_search_latency_seconds.collect()[0].samples
+    initial_latency_count = next((s.value for s in initial_latency_samples if s.name == 'semantic_search_latency_seconds_count'), 0.0)
+    
+    initial_faiss_samples = semantic_faiss_search_latency_seconds.collect()[0].samples
+    initial_faiss_count = next((s.value for s in initial_faiss_samples if s.name == 'semantic_faiss_search_latency_seconds_count'), 0.0)
     
     # Perform search
     results = semantic_service_with_index.search("test query", top_k=2)
@@ -137,11 +143,14 @@ def test_search_tracks_request_metrics(semantic_service_with_index):
     # Check metrics were updated
     assert semantic_search_requests_total._value.get() == initial_requests + 1
     
-    latency_samples = list(semantic_search_latency_seconds.collect()[0].samples)
-    assert len(latency_samples) > initial_latency_samples
+    # Check that observations were recorded (histogram count should increase)
+    latency_samples = semantic_search_latency_seconds.collect()[0].samples
+    latency_count = next((s.value for s in latency_samples if s.name == 'semantic_search_latency_seconds_count'), 0.0)
+    assert latency_count >= initial_latency_count + 1
     
-    faiss_samples = list(semantic_faiss_search_latency_seconds.collect()[0].samples)
-    assert len(faiss_samples) > initial_faiss_samples
+    faiss_samples = semantic_faiss_search_latency_seconds.collect()[0].samples
+    faiss_count = next((s.value for s in faiss_samples if s.name == 'semantic_faiss_search_latency_seconds_count'), 0.0)
+    assert faiss_count >= initial_faiss_count + 1
     
     assert len(results) > 0
 

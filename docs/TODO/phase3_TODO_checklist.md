@@ -5,16 +5,10 @@
 **Timeline**: Weeks 11-16
 
 **Status**: 
-- ⏳ **3.1 Redis Caching Layer**: NOT IMPLEMENTED
-- ⏳ **3.2 Rate Limiting**: NOT IMPLEMENTED
-- ⏳ **3.3 Circuit Breakers**: NOT IMPLEMENTED
-- ⏳ **3.4 Database Optimization**: NOT IMPLEMENTED
-- ⏳ **3.5 Async/Await Optimization**: NOT IMPLEMENTED
-
-**Dependencies**: 
-- Phase 1.1 Structured Logging (for cache operation logging)
-- Phase 1.2 Metrics Collection (for cache hit rate metrics)
-- Phase 2.1 Semantic Search (for FAISS circuit breaker)
+- ✅ **3.1 Semantic Search (FAISS)**: Core implementation COMPLETE
+- ✅ **3.2 Collaborative Filtering**: Core implementation COMPLETE
+- ⏳ **3.3 Feature Store**: NOT IMPLEMENTED
+- ⏳ **3.4 Query Enhancement**: NOT IMPLEMENTED
 
 ---
 
@@ -206,72 +200,107 @@
 
 ## 3.3 Circuit Breakers
 
+**Status**: ✅ **Core implementation complete**.
+
+**Implemented**:
+- Implicit ALS model training and serving
+- User-product interaction matrix building
+- CF score computation and integration with ranking
+- Cold start handling (new users/products)
+- Prometheus metrics for CF scoring and cold start
+- Comprehensive unit and integration tests
+
 ### Setup & Configuration
-- [ ] Install circuit breaker library (`pybreaker` or custom implementation)
-- [ ] Create circuit breaker module (`app/core/circuit_breaker.py`)
-- [ ] Configure circuit breaker parameters:
-  - [ ] Failure threshold: 50% error rate over 1 minute
-  - [ ] Open duration: 30 seconds
-  - [ ] Half-open test traffic: 10%
+- [x] Install `implicit` library (Implicit ALS)
+- [x] Install additional dependencies (numpy, scipy)
+- [x] Add implicit and dependencies to `requirements.txt`
+- [x] Create collaborative filtering service module (`app/services/recommendation/collaborative.py`)
+- [x] Configure model parameters (factors, regularization, iterations)
 
-### Database Circuit Breaker
-- [ ] Implement circuit breaker for database connections
-- [ ] Monitor database query failures
-- [ ] Open circuit on high error rate
-- [ ] Implement fallback: Return cached results or 503
-- [ ] Add circuit breaker state metrics
-- [ ] Log circuit breaker state changes
+### Data Preparation
+- [x] Create data extraction script for user-product interactions
+- [x] Query events table for user-product interaction matrix
+- [x] Aggregate interactions by type (view, click, purchase) with weights
+- [x] Handle implicit feedback (views, clicks) vs explicit (ratings)
+- [x] Create sparse matrix representation (CSR format)
+- [x] Add data validation (check for empty matrix, minimum interactions)
+- [x] Create data preprocessing pipeline
 
-### Redis Circuit Breaker
-- [ ] Implement circuit breaker for Redis connections
-- [ ] Monitor Redis operation failures
-- [ ] Open circuit on high error rate
-- [ ] Implement fallback: Direct database queries (slower)
-- [ ] Add circuit breaker state metrics
-- [ ] Log circuit breaker state changes
+### Model Training (Offline)
+- [x] Create training script (`scripts/train_cf_model.py`)
+- [x] Implement Implicit ALS model training
+- [x] Configure hyperparameters (factors, regularization, iterations, alpha)
+- [ ] Add cross-validation for hyperparameter tuning (optional enhancement)
+- [x] Save model artifacts (user factors, item factors)
+- [x] Save model metadata (training date, parameters, metrics)
+- [ ] Create nightly batch job for model training (manual trigger for Phase 3.2)
+- [x] Add model versioning
+- [x] Handle training failures gracefully
 
-### FAISS Circuit Breaker
-- [ ] Implement circuit breaker for FAISS index operations
-- [ ] Monitor FAISS search failures
-- [ ] Open circuit on high error rate
-- [ ] Implement fallback: Keyword search only
-- [ ] Add circuit breaker state metrics
-- [ ] Log circuit breaker state changes
+### Model Artifact Storage
+- [x] Set up model artifact storage (S3-compatible or local filesystem)
+- [x] Create model registry structure
+- [x] Implement model versioning system
+- [x] Store model metadata (training metrics, parameters, date)
+- [x] Create model loading service
+- [x] Add model validation on load
+- [ ] Implement model rollback capability (optional enhancement)
 
-### Health Check Endpoints
-- [ ] Create health check endpoint: `GET /health`
-- [ ] Create detailed health check: `GET /health/detailed`
-- [ ] Check database connectivity
-- [ ] Check Redis connectivity
-- [ ] Check FAISS index availability
-- [ ] Return health status per service
-- [ ] Return circuit breaker state per service
+### Model Scoring (Online)
+- [x] Create CF scoring service
+- [x] Load model artifacts (user/item factors) on startup
+- [x] Implement `user_product_affinity` score calculation
+- [x] Compute scores for candidate products
+- [ ] Cache user factors in Redis (TTL: 24 hours) (in-memory cache for Phase 3.2)
+- [x] Handle missing users (cold start)
+- [x] Handle missing products (cold start)
+- [x] Optimize scoring for batch requests
+
+### Cold Start Handling
+- [x] Implement new user handling (use popularity-based recommendations)
+- [x] Implement new product handling (use content-based/embedding similarity)
+- [x] Create transition logic: After 5 interactions, use CF scores
+- [x] Track user interaction count
+- [ ] Blend CF scores with popularity scores during transition (optional enhancement)
+- [x] Add cold start metrics (new user count, new product count)
+
+### Integration with Recommendation Endpoint
+- [x] Integrate CF scoring into recommendation endpoint
+- [x] Combine CF scores with existing ranking features
+- [x] Add CF as optional feature (feature flag)
+- [x] Update recommendation response to include CF scores
+- [x] Maintain backward compatibility
+- [x] Update API documentation
+
+### A/B Testing Setup
+- [ ] Create A/B test framework for CF vs popularity baseline (future enhancement)
+- [ ] Implement traffic splitting (50/50 or configurable)
+- [ ] Track experiment metrics (CTR, CVR, engagement)
+- [ ] Create experiment dashboard
+- [ ] Add statistical analysis tools
+- [ ] Document A/B test results
 
 ### Testing
-- [ ] Write unit tests for circuit breaker logic
-- [ ] Write unit tests for failure threshold detection
-- [ ] Write unit tests for half-open state
-- [ ] Write integration tests for database circuit breaker
-- [ ] Write integration tests for Redis circuit breaker
-- [ ] Write integration tests for FAISS circuit breaker
-- [ ] Test circuit breaker opens on high error rate
-- [ ] Test circuit breaker closes after recovery
-- [ ] Test fallback mechanisms
-- [ ] Test health check endpoints
+- [x] Write unit tests for data preparation
+- [x] Write unit tests for model training
+- [x] Write unit tests for CF scoring
+- [x] Write unit tests for cold start handling
+- [x] Write integration tests for recommendation endpoint with CF
+- [x] Test with sparse interaction matrix
+- [x] Test with new users (cold start)
+- [x] Test with new products (cold start)
+- [ ] Verify CF recommendations show personalization (different users get different results) (manual testing)
+- [x] Performance test: CF scoring latency
 
 ### Monitoring & Metrics
-- [ ] Add metric: `circuit_breaker_state{service}` (0=closed, 1=open, 2=half-open)
-- [ ] Add metric: `circuit_breaker_failures_total{service}`
-- [ ] Add metric: `circuit_breaker_opens_total{service}`
-- [ ] Add metric: `circuit_breaker_closes_total{service}`
-- [ ] Add Grafana dashboard for circuit breakers
-- [ ] Log circuit breaker state changes
-
-### Success Criteria
-- [ ] Circuit breakers prevent cascading failures
-- [ ] Fallback mechanisms work correctly
-- [ ] Health check endpoints report accurate status
-- [ ] Circuit breaker metrics are tracked correctly
+- [x] Add metrics: CF recommendation request count
+- [x] Add metrics: CF scoring latency
+- [ ] Add metrics: model training duration (logged, not exposed as metric)
+- [x] Add metrics: cold start usage count
+- [ ] Add metrics: A/B test metrics (CTR, CVR) (future enhancement)
+- [ ] Track model performance over time (future enhancement)
+- [x] Log CF recommendations and scores
+- [x] Monitor model staleness (time since last training)
 
 ---
 
