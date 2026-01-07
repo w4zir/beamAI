@@ -48,9 +48,23 @@ services:
       # Supabase connection (external standalone container)
       SUPABASE_URL: ${SUPABASE_URL:-http://localhost:54321}
       SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-your-service-key}
-      # Direct PostgreSQL connection (alternative)
+      # Direct PostgreSQL connection
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
       REDIS_URL: redis://redis:6379
+      # Logging Configuration
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: ${LOG_JSON:-true}
+      # OpenTelemetry Distributed Tracing Configuration
+      OTEL_SERVICE_NAME: beamai_search_api
+      OTEL_EXPORTER_JAEGER_ENDPOINT: http://jaeger:14268/api/traces
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1.0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      # Semantic Search Configuration
+      ENABLE_SEMANTIC_SEARCH: ${ENABLE_SEMANTIC_SEARCH:-false}
+      # Query Enhancement Configuration
+      ENABLE_QUERY_ENHANCEMENT: ${ENABLE_QUERY_ENHANCEMENT:-false}
+      QUERY_SPELL_CORRECTION_THRESHOLD: ${QUERY_SPELL_CORRECTION_THRESHOLD:-0.8}
+      QUERY_MAX_SYNONYMS: ${QUERY_MAX_SYNONYMS:-5}
     ports:
       - "8000:8000"
     volumes:
@@ -61,6 +75,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
       interval: 30s
@@ -81,6 +97,7 @@ services:
       # Supabase connection (external standalone container)
       VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://localhost:54321}
       VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
+      # Backend API URL (accessible from browser, so use localhost)
       VITE_API_URL: http://localhost:8000
     ports:
       - "5173:5173"
@@ -88,7 +105,8 @@ services:
       - ./frontend:/app
       - /app/node_modules
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - beamai-network
     restart: unless-stopped
@@ -110,7 +128,14 @@ services:
       - '--storage.tsdb.retention.time=30d'
       - '--web.enable-lifecycle'
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - beamai-network
     restart: unless-stopped
@@ -127,12 +152,22 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=http://localhost:3000
       - GF_INSTALL_PLUGINS=
+      - GF_DATASOURCES_ALLOW_EDIT=true
+      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=grafana-exploretraces-app,grafana-metricsdrilldown-app,grafana-lokiexplore-app,grafana-pyroscope-app
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chmod +x /wait-for-prometheus.sh
+        /wait-for-prometheus.sh prometheus 9090 /run.sh
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana/wait-for-prometheus.sh:/wait-for-prometheus.sh:ro
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
     networks:
       - beamai-network
     restart: unless-stopped
@@ -151,7 +186,14 @@ services:
       - '--storage.path=/alertmanager'
       - '--web.external-url=http://localhost:9093'
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9093/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - beamai-network
     restart: unless-stopped
@@ -166,6 +208,12 @@ services:
       - "14250:14250"  # gRPC collector
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:16686/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - beamai-network
     restart: unless-stopped

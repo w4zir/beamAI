@@ -22,22 +22,27 @@ Note: Jaeger exporter package has been removed from requirements due to dependen
 Use OTLP exporter instead - Jaeger can receive traces via OTLP endpoint.
 """
 import os
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Sequence, TYPE_CHECKING
 from contextvars import ContextVar
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, SpanExportResult
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.trace import Span
 
 # Jaeger exporter is deprecated - use OTLP exporter instead
 # OTLP can send traces to Jaeger via OTLP endpoint
+if TYPE_CHECKING:
+    from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+
 try:
     from opentelemetry.exporter.jaeger.thrift import JaegerExporter
     JAEGER_AVAILABLE = True
 except ImportError:
     JAEGER_AVAILABLE = False
+    JaegerExporter = None  # type: ignore
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.trace import Status, StatusCode, Tracer
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
@@ -52,6 +57,56 @@ trace_context_var: ContextVar[Optional[Dict[str, str]]] = ContextVar("trace_cont
 # Global tracer instance
 _tracer: Optional[Tracer] = None
 _tracer_provider: Optional[TracerProvider] = None
+
+
+class ResilientJaegerExporter(SpanExporter):
+    """
+    Wrapper around JaegerExporter that handles connection errors gracefully.
+    
+    This prevents connection failures from appearing as exceptions in logs
+    when Jaeger is not available. Connection errors are logged as warnings
+    but do not interrupt application execution.
+    """
+    
+    def __init__(self, jaeger_exporter: Any):  # type: ignore
+        self._exporter = jaeger_exporter
+        self._connection_failed = False
+    
+    def export(self, spans: Sequence[Span]) -> SpanExportResult:
+        """
+        Export spans to Jaeger, handling connection errors gracefully.
+        
+        Args:
+            spans: List of spans to export
+            
+        Returns:
+            SpanExportResult indicating success or failure
+        """
+        try:
+            return self._exporter.export(spans)
+        except (ConnectionRefusedError, OSError, Exception) as e:
+            # Log connection errors only once to avoid spam
+            if not self._connection_failed:
+                logger.warning(
+                    "tracing_jaeger_export_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    message="Jaeger is not available. Traces will be generated but not exported. Start Jaeger or disable tracing to suppress this message.",
+                )
+                self._connection_failed = True
+            # Return success to prevent retries and exception propagation
+            return SpanExportResult.SUCCESS
+    
+    def shutdown(self) -> None:
+        """Shutdown the underlying exporter."""
+        try:
+            self._exporter.shutdown()
+        except Exception as e:
+            logger.debug(
+                "tracing_jaeger_shutdown_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
 
 
 def configure_tracing(
@@ -132,7 +187,9 @@ def configure_tracing(
                     agent_host_name=host,
                     agent_port=port,
                 )
-                span_processor = BatchSpanProcessor(jaeger_exporter)
+                # Wrap exporter to handle connection errors gracefully
+                resilient_exporter = ResilientJaegerExporter(jaeger_exporter)
+                span_processor = BatchSpanProcessor(resilient_exporter)
                 _tracer_provider.add_span_processor(span_processor)
                 logger.info(
                     "tracing_jaeger_configured",

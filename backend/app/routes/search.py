@@ -22,6 +22,10 @@ from app.services.search.hybrid import hybrid_search
 from app.services.search.semantic import get_semantic_search_service
 from app.services.search.query_enhancement import get_query_enhancement_service
 from app.services.ranking.score import rank_products
+from app.services.cache.query_cache import (
+    get_cached_search_results,
+    cache_search_results,
+)
 
 logger = get_logger(__name__)
 
@@ -51,10 +55,6 @@ async def search(
     """
     start_time = time.time()
     query = q.strip() if q else ""
-    # TODO: Implement caching in Phase 2 - cache hits/misses will be recorded when implemented
-    
-    # Record cache miss (since caching not implemented yet)
-    record_cache_miss("search")
     
     # Set user_id in context if provided
     if user_id:
@@ -66,6 +66,21 @@ async def search(
             query=q,
         )
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+    
+    # Check cache first (Phase 3.1)
+    cached_results = await get_cached_search_results(query, user_id, k)
+    if cached_results is not None:
+        # Convert cached results to SearchResult models
+        results = [SearchResult(**r) for r in cached_results]
+        latency_ms = int((time.time() - start_time) * 1000)
+        logger.info(
+            "search_completed_cached",
+            query=query,
+            user_id=user_id,
+            results_count=len(results),
+            latency_ms=latency_ms,
+        )
+        return results
     
     try:
         # Check feature flag for query enhancement
@@ -136,9 +151,9 @@ async def search(
             )
             return []
         
-        # Apply ranking
+        # Apply ranking (async, Phase 3.5)
         try:
-            ranked = rank_products(candidates, is_search=True, user_id=user_id)
+            ranked = await rank_products(candidates, is_search=True, user_id=user_id)
             
             # Format results and record ranking scores
             results = []
@@ -181,6 +196,11 @@ async def search(
             use_hybrid=use_hybrid,
             enable_query_enhancement=enable_query_enhancement,
         )
+        
+        # Cache results (Phase 3.1)
+        # Convert SearchResult models to dicts for caching
+        results_dict = [r.dict() for r in results]
+        await cache_search_results(query, user_id, k, results_dict)
         
         return results
         

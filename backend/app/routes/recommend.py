@@ -18,6 +18,10 @@ from app.core.metrics import (
 from app.services.recommendation.popularity import get_popularity_recommendations
 from app.services.ranking.score import rank_products
 from app.core.database import get_supabase_client
+from app.services.cache.query_cache import (
+    get_cached_recommend_results,
+    cache_recommend_results,
+)
 
 logger = get_logger(__name__)
 
@@ -43,13 +47,23 @@ async def recommend(
     Returns ranked results using Phase 1 ranking formula.
     """
     start_time = time.time()
-    # TODO: Implement caching in Phase 2 - cache hits/misses will be recorded when implemented
-    
-    # Record cache miss (since caching not implemented yet)
-    record_cache_miss("recommendation")
     
     # Set user_id in context
     set_user_id(user_id)
+    
+    # Check cache first (Phase 3.1)
+    cached_results = await get_cached_recommend_results(user_id, None, k)
+    if cached_results is not None:
+        # Convert cached results to RecommendResult models
+        results = [RecommendResult(**r) for r in cached_results]
+        latency_ms = int((time.time() - start_time) * 1000)
+        logger.info(
+            "recommendation_completed_cached",
+            user_id=user_id,
+            results_count=len(results),
+            latency_ms=latency_ms,
+        )
+        return results
     
     try:
         logger.info(
@@ -85,9 +99,9 @@ async def recommend(
         # Convert to candidates format (product_id, search_score=0 for recommendations)
         candidates = [(product_id, 0.0) for product_id in candidate_ids]
         
-        # Apply ranking (is_search=False for recommendations)
+        # Apply ranking (is_search=False for recommendations, async Phase 3.5)
         try:
-            ranked = rank_products(candidates, is_search=False, user_id=user_id)
+            ranked = await rank_products(candidates, is_search=False, user_id=user_id)
             
             # Format results and record ranking scores
             results = []
@@ -134,6 +148,11 @@ async def recommend(
             results_count=len(results),
             latency_ms=latency_ms,
         )
+        
+        # Cache results (Phase 3.1)
+        # Convert RecommendResult models to dicts for caching
+        results_dict = [r.dict() for r in results]
+        await cache_recommend_results(user_id, None, k, results_dict)
         
         return results
         

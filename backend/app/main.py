@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from .core.logging import configure_logging, get_logger, get_trace_id
 from .core.middleware import TraceIDMiddleware
 from .core.metrics import record_http_request
+from .core.rate_limit import initialize_rate_limit_middleware
 from .core.tracing import (
     configure_tracing,
     instrument_fastapi,
@@ -15,9 +16,11 @@ from .core.tracing import (
     set_span_status,
     StatusCode,
 )
-from .routes import health, search, recommend, events, metrics
+from .routes import health, search, recommend, events, metrics, admin
 from .services.search.semantic import initialize_semantic_search
 from .services.recommendation.collaborative import initialize_collaborative_filtering
+from .core.cache import initialize_redis, close_redis
+from .core.database_pool import initialize_database_pool, close_database_pools
 
 # Configure structured logging
 # Use JSON output in production (containerized), console output in development
@@ -51,6 +54,10 @@ app.add_middleware(
 # Add trace ID middleware (must be after CORS middleware)
 app.add_middleware(TraceIDMiddleware)
 
+# Add rate limiting middleware (Phase 3.2)
+# Initialize after Redis is available (will be set up in startup)
+rate_limit_middleware = initialize_rate_limit_middleware(app)
+
 # Instrument FastAPI with OpenTelemetry (creates automatic spans for HTTP requests)
 instrument_fastapi(app)
 
@@ -60,6 +67,32 @@ instrument_fastapi(app)
 async def startup_event():
     """Initialize services on application startup."""
     logger.info("app_startup_started")
+    
+    # Initialize Redis cache (Phase 3.1)
+    redis_initialized = await initialize_redis()
+    if redis_initialized:
+        logger.info("app_startup_redis_ready")
+        # Update rate limit middleware with Redis client
+        from app.core.rate_limit import get_rate_limit_middleware
+        from app.core.cache import get_redis_client
+        middleware = get_rate_limit_middleware()
+        if middleware:
+            middleware.redis_client = get_redis_client()
+    else:
+        logger.warning(
+            "app_startup_redis_unavailable",
+            message="Redis cache not available. System will function without caching (degraded performance).",
+        )
+    
+    # Initialize database connection pools (Phase 3.4)
+    db_pool_initialized = await initialize_database_pool()
+    if db_pool_initialized:
+        logger.info("app_startup_database_pool_ready")
+    else:
+        logger.warning(
+            "app_startup_database_pool_unavailable",
+            message="Database connection pool not available. System may not function correctly.",
+        )
     
     # Initialize semantic search (loads FAISS index if available)
     # This will gracefully fail if index is not available, falling back to keyword-only search
@@ -94,6 +127,8 @@ async def shutdown_event():
     """Cleanup resources on application shutdown."""
     logger.info("app_shutdown_started")
     shutdown_tracing()
+    await close_redis()  # Close Redis connection pool (Phase 3.1)
+    await close_database_pools()  # Close database connection pools (Phase 3.4)
     logger.info("app_shutdown_completed")
 
 
@@ -177,5 +212,6 @@ app.include_router(search.router, prefix="/search", tags=["Search"])
 app.include_router(recommend.router, prefix="/recommend", tags=["Recommendations"])
 app.include_router(events.router, prefix="/events", tags=["Events"])
 app.include_router(metrics.router, prefix="/metrics", tags=["Metrics"])
+app.include_router(admin.router, prefix="/admin", tags=["Admin"])
 
 
