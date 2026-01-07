@@ -1530,7 +1530,7 @@ llm_schema_validation_failures_total{agent="rewrite"}
 ### AI Integration (Parallel Track)
 **Note**: AI phases can be implemented in parallel with core phases. They enhance existing functionality without blocking core development.
 
-- **AI Phase 1** (Weeks 5-8): Query Understanding - Enhances Phase 2.2 Query Enhancement
+- **AI Phase 1** (Weeks 5-8): Query Understanding - Enhances Phase 2.2 Query Enhancement ✅ (control-plane orchestration and Tier 1 agents implemented)
 - **AI Phase 2** (Weeks 9-12): Content Generation - Enhances Phase 2.1 Semantic Search
 - **AI Phase 3** (Weeks 13-16): Explainability - Enhances Phase 8.4 Ranking Explanation
 - **AI Phase 4** (Weeks 17-20): Clarification & Conversational - Enhances UX

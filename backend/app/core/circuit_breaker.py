@@ -99,7 +99,11 @@ class CircuitBreaker:
                 total = len(self._request_history)
                 error_rate = failures / total if total > 0 else 0.0
                 
-                if error_rate >= self.failure_threshold:
+                # Open the circuit only when error rate strictly exceeds the
+                # configured threshold. This matches the intent of a "failure
+                # threshold" (e.g. >50% errors), and aligns with tests that
+                # expect the circuit to remain closed exactly at the threshold.
+                if error_rate > self.failure_threshold:
                     self._state = CircuitState.OPEN
                     self._opened_at = now
                     logger.warning(

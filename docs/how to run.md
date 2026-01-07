@@ -392,6 +392,15 @@ OTEL_TRACES_SAMPLER_ARG=1.0
 # Feature Flags
 ENABLE_SEMANTIC_SEARCH=false
 ENABLE_QUERY_ENHANCEMENT=false
+ENABLE_AI_ORCHESTRATION=false        # Tier 1 AI orchestration layer (intent + rewrite)
+
+# Tier 1 LLM configuration (AI Phase 1)
+LLM_API_BASE=https://api.openai.com/v1   # Any OpenAI-compatible /chat/completions endpoint
+LLM_API_KEY=your_llm_api_key_here        # Omit in local/dev to disable LLMs
+LLM_TIER1_MODEL=gpt-3.5-turbo
+LLM_TIER1_TIMEOUT_SECONDS=5.0
+# Optional: cost tracking hint (USD per 1K tokens, for metrics only)
+LLM_TIER1_COST_PER_1K_TOKENS=0.0
 ```
 
 **Service Dependencies:**

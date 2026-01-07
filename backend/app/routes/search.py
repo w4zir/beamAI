@@ -21,6 +21,7 @@ from app.services.search.keyword import search_keywords
 from app.services.search.hybrid import hybrid_search
 from app.services.search.semantic import get_semantic_search_service
 from app.services.search.query_enhancement import get_query_enhancement_service
+from app.services.ai.orchestration import get_ai_orchestration_service
 from app.services.ranking.score import rank_products
 from app.services.cache.query_cache import (
     get_cached_search_results,
@@ -67,34 +68,55 @@ async def search(
         )
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
     
-    # Check cache first (Phase 3.1)
-    cached_results = await get_cached_search_results(query, user_id, k)
-    if cached_results is not None:
-        # Convert cached results to SearchResult models
-        results = [SearchResult(**r) for r in cached_results]
-        latency_ms = int((time.time() - start_time) * 1000)
-        logger.info(
-            "search_completed_cached",
-            query=query,
-            user_id=user_id,
-            results_count=len(results),
-            latency_ms=latency_ms,
-        )
-        return results
-    
     try:
+        # Check cache first (Phase 3.1)
+        cached_results = await get_cached_search_results(query, user_id, k)
+        if cached_results is not None:
+            # Convert cached results to SearchResult models
+            results = [SearchResult(**r) for r in cached_results]
+            latency_ms = int((time.time() - start_time) * 1000)
+            logger.info(
+                "search_completed_cached",
+                query=query,
+                user_id=user_id,
+                results_count=len(results),
+                latency_ms=latency_ms,
+            )
+            return results
+
         # Check feature flag for query enhancement
         enable_query_enhancement = os.getenv("ENABLE_QUERY_ENHANCEMENT", "false").lower() == "true"
+        enable_ai_orchestration = os.getenv("ENABLE_AI_ORCHESTRATION", "false").lower() == "true"
         
-        # Apply query enhancement if enabled
+        # Apply AI orchestration (Tier 1) and/or query enhancement if enabled.
         enhanced_query_obj = None
         search_query = query  # Default to original query
-        
-        if enable_query_enhancement:
+        ai_result = None
+
+        # AI orchestration runs first when enabled. It operates strictly in the
+        # control-plane and never performs retrieval or ranking.
+        if enable_ai_orchestration:
+            ai_service = get_ai_orchestration_service()
+            try:
+                ai_result = await ai_service.orchestrate_search(query)
+                if ai_result.used_ai and ai_result.final_query:
+                    search_query = ai_result.final_query
+            except Exception as ai_error:
+                logger.warning(
+                    "ai_orchestration_failed",
+                    query=query,
+                    error=str(ai_error),
+                    error_type=type(ai_error).__name__,
+                )
+                # Fallback is handled by existing deterministic path below.
+
+        # If AI orchestration either isn't enabled or couldn't provide a final
+        # query, we optionally fall back to deterministic query enhancement.
+        if (not ai_result or not ai_result.used_ai) and enable_query_enhancement:
             enhancement_service = get_query_enhancement_service()
             enhanced_query_obj = enhancement_service.enhance(query)
             search_query = enhanced_query_obj.get_final_query()
-            
+
             # Record query enhancement metrics
             record_query_enhancement(
                 correction_applied=enhanced_query_obj.correction_applied,
@@ -103,7 +125,7 @@ async def search(
                 classification=enhanced_query_obj.classification,
                 latency_seconds=enhanced_query_obj.enhancement_latency_ms / 1000.0,
             )
-            
+
             logger.info(
                 "query_enhancement_applied",
                 original_query=query,
@@ -122,13 +144,14 @@ async def search(
         logger.info(
             "search_started",
             query=query,
-            enhanced_query=search_query if enable_query_enhancement else None,
+            enhanced_query=search_query if (enable_query_enhancement or enable_ai_orchestration) else None,
             user_id=user_id,
             k=k,
             enable_semantic=enable_semantic,
             semantic_available=semantic_available,
             use_hybrid=use_hybrid,
             enable_query_enhancement=enable_query_enhancement,
+            enable_ai_orchestration=enable_ai_orchestration,
         )
         
         # Get candidates from search service (hybrid or keyword only)
@@ -145,7 +168,7 @@ async def search(
             logger.info(
                 "search_zero_results",
                 query=query,
-                enhanced_query=search_query if enable_query_enhancement else None,
+                enhanced_query=search_query if (enable_query_enhancement or enable_ai_orchestration) else None,
                 user_id=user_id,
                 latency_ms=latency_ms,
             )
@@ -189,12 +212,13 @@ async def search(
         logger.info(
             "search_completed",
             query=query,
-            enhanced_query=search_query if enable_query_enhancement else None,
+            enhanced_query=search_query if (enable_query_enhancement or enable_ai_orchestration) else None,
             user_id=user_id,
             results_count=len(results),
             latency_ms=latency_ms,
             use_hybrid=use_hybrid,
             enable_query_enhancement=enable_query_enhancement,
+            enable_ai_orchestration=enable_ai_orchestration,
         )
         
         # Cache results (Phase 3.1)

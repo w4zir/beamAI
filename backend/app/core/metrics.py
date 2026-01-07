@@ -374,6 +374,83 @@ query_enhancement_latency_seconds = Histogram(
 
 
 # ============================================================================
+# LLM / AI ORCHESTRATION METRICS
+# ============================================================================
+
+llm_requests_total = Counter(
+    "llm_requests_total",
+    "Total number of LLM requests",
+    ["agent", "model", "tier"],
+    registry=registry,
+)
+
+llm_errors_total = Counter(
+    "llm_errors_total",
+    "Total number of LLM errors",
+    ["agent", "reason"],
+    registry=registry,
+)
+
+llm_latency_ms = Histogram(
+    "llm_latency_ms",
+    "LLM request latency in milliseconds",
+    ["agent", "tier"],
+    # Focus on fast Tier 1 SLA (p95 < 80ms) but allow slower tails
+    buckets=[5, 10, 20, 40, 80, 150, 300, 500, 1000],
+    registry=registry,
+)
+
+llm_cache_hit_total = Counter(
+    "llm_cache_hit_total",
+    "Total number of LLM cache hits",
+    ["agent"],
+    registry=registry,
+)
+
+llm_cache_miss_total = Counter(
+    "llm_cache_miss_total",
+    "Total number of LLM cache misses",
+    ["agent"],
+    registry=registry,
+)
+
+llm_schema_validation_failures_total = Counter(
+    "llm_schema_validation_failures_total",
+    "Total number of LLM schema validation failures",
+    ["agent"],
+    registry=registry,
+)
+
+llm_low_confidence_total = Counter(
+    "llm_low_confidence_total",
+    "Total number of low-confidence LLM results",
+    ["agent"],
+    registry=registry,
+)
+
+llm_tokens_input_total = Counter(
+    "llm_tokens_input_total",
+    "Total number of input tokens sent to LLMs",
+    ["agent", "model"],
+    registry=registry,
+)
+
+llm_tokens_output_total = Counter(
+    "llm_tokens_output_total",
+    "Total number of output tokens received from LLMs",
+    ["agent", "model"],
+    registry=registry,
+)
+
+llm_cost_usd_total = Counter(
+    "llm_cost_usd_total",
+    "Total estimated LLM cost in USD",
+    ["agent", "model"],
+    registry=registry,
+)
+
+
+# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
@@ -750,4 +827,78 @@ def record_query_enhancement(
     # Record latency
     if latency_seconds > 0:
         query_enhancement_latency_seconds.observe(latency_seconds)
+
+
+# ============================================================================
+# LLM METRIC HELPERS
+# ============================================================================
+
+def record_llm_request(
+    agent: str,
+    model: str,
+    tier: str,
+    duration_ms: float,
+) -> None:
+    """
+    Record a single LLM request and its latency.
+
+    Args:
+        agent: Logical agent name (e.g., \"intent\", \"rewrite\")
+        model: Model name (e.g., \"gpt-3.5-turbo\")
+        tier: LLM tier (\"1\" or \"2\")
+        duration_ms: Request duration in milliseconds
+    """
+    llm_requests_total.labels(agent=agent, model=model, tier=tier).inc()
+    # Store latency in milliseconds histogram to align with AI specs
+    llm_latency_ms.labels(agent=agent, tier=tier).observe(duration_ms)
+
+
+def record_llm_cache_hit(agent: str) -> None:
+    """Record an LLM cache hit for a given agent."""
+    llm_cache_hit_total.labels(agent=agent).inc()
+
+
+def record_llm_cache_miss(agent: str) -> None:
+    """Record an LLM cache miss for a given agent."""
+    llm_cache_miss_total.labels(agent=agent).inc()
+
+
+def record_llm_error(agent: str, reason: str) -> None:
+    """Record an LLM error with a reason label (e.g. timeout, api_error)."""
+    llm_errors_total.labels(agent=agent, reason=reason).inc()
+
+
+def record_llm_schema_validation_failure(agent: str) -> None:
+    """Record a schema validation failure for a given agent."""
+    llm_schema_validation_failures_total.labels(agent=agent).inc()
+
+
+def record_llm_low_confidence(agent: str) -> None:
+    """Record a low-confidence LLM output for a given agent."""
+    llm_low_confidence_total.labels(agent=agent).inc()
+
+
+def record_llm_tokens_and_cost(
+    agent: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cost_usd: float = 0.0,
+) -> None:
+    """
+    Record LLM token usage and estimated cost.
+
+    Args:
+        agent: Logical agent name
+        model: Model name
+        input_tokens: Number of prompt/input tokens
+        output_tokens: Number of completion/output tokens
+        cost_usd: Estimated cost in USD (can be 0.0 if not computed)
+    """
+    if input_tokens > 0:
+        llm_tokens_input_total.labels(agent=agent, model=model).inc(input_tokens)
+    if output_tokens > 0:
+        llm_tokens_output_total.labels(agent=agent, model=model).inc(output_tokens)
+    if cost_usd > 0:
+        llm_cost_usd_total.labels(agent=agent, model=model).inc(cost_usd)
 

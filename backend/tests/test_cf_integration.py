@@ -76,8 +76,9 @@ def mock_product_features():
     }
 
 
+@pytest.mark.asyncio
 @patch('app.services.ranking.features.get_product_features')
-def test_ranking_without_cf(mock_get_features, mock_product_features):
+async def test_ranking_without_cf(mock_get_features, mock_product_features):
     """Test ranking without CF service."""
     # Reset global CF service
     import app.services.recommendation.collaborative as cf_module
@@ -86,7 +87,7 @@ def test_ranking_without_cf(mock_get_features, mock_product_features):
     mock_get_features.return_value = mock_product_features
     
     candidates = [("product1", 0.9), ("product2", 0.7), ("product3", 0.5)]
-    ranked = rank_products(candidates, is_search=True, user_id=None)
+    ranked = await rank_products(candidates, is_search=True, user_id=None)
     
     assert len(ranked) == 3
     # Check that cf_score is 0.0 when CF not available
@@ -94,15 +95,16 @@ def test_ranking_without_cf(mock_get_features, mock_product_features):
         assert breakdown["cf_score"] == 0.0
 
 
+@pytest.mark.asyncio
 @patch('app.services.ranking.features.get_product_features')
 @patch('app.services.recommendation.collaborative.get_collaborative_filtering_service')
-def test_ranking_with_cf(mock_get_cf_service, mock_get_features, sample_cf_service, mock_product_features):
+async def test_ranking_with_cf(mock_get_cf_service, mock_get_features, sample_cf_service, mock_product_features):
     """Test ranking with CF service."""
     mock_get_cf_service.return_value = sample_cf_service
     mock_get_features.return_value = mock_product_features
     
     candidates = [("product1", 0.9), ("product2", 0.7), ("product3", 0.5)]
-    ranked = rank_products(candidates, is_search=True, user_id="user1")
+    ranked = await rank_products(candidates, is_search=True, user_id="user1")
     
     assert len(ranked) == 3
     # Check that cf_score is computed (may be 0.0 for cold start, but should be present)
@@ -111,16 +113,17 @@ def test_ranking_with_cf(mock_get_cf_service, mock_get_features, sample_cf_servi
         assert 0.0 <= breakdown["cf_score"] <= 1.0
 
 
+@pytest.mark.asyncio
 @patch('app.services.ranking.features.get_product_features')
 @patch('app.services.recommendation.collaborative.get_collaborative_filtering_service')
-def test_ranking_recommendations_with_cf(mock_get_cf_service, mock_get_features, sample_cf_service, mock_product_features):
+async def test_ranking_recommendations_with_cf(mock_get_cf_service, mock_get_features, sample_cf_service, mock_product_features):
     """Test ranking recommendations with CF."""
     mock_get_cf_service.return_value = sample_cf_service
     mock_get_features.return_value = mock_product_features
     
     # For recommendations, search_score should be 0
     candidates = [("product1", 0.0), ("product2", 0.0), ("product3", 0.0)]
-    ranked = rank_products(candidates, is_search=False, user_id="user1")
+    ranked = await rank_products(candidates, is_search=False, user_id="user1")
     
     assert len(ranked) == 3
     for product_id, final_score, breakdown in ranked:
@@ -128,10 +131,11 @@ def test_ranking_recommendations_with_cf(mock_get_cf_service, mock_get_features,
         assert "cf_score" in breakdown
 
 
+@pytest.mark.asyncio
 @patch('app.services.ranking.features.get_product_features')
 @patch('app.services.recommendation.collaborative.get_collaborative_filtering_service')
 @patch('app.services.recommendation.collaborative.get_supabase_client')
-def test_ranking_cold_start_user(mock_get_client, mock_get_cf_service, mock_get_features, sample_cf_service, mock_product_features):
+async def test_ranking_cold_start_user(mock_get_client, mock_get_cf_service, mock_get_features, sample_cf_service, mock_product_features):
     """Test ranking with cold start user."""
     # Mock Supabase to return low interaction count
     mock_client = Mock()
@@ -144,7 +148,7 @@ def test_ranking_cold_start_user(mock_get_client, mock_get_cf_service, mock_get_
     mock_get_features.return_value = mock_product_features
     
     candidates = [("product1", 0.9), ("product2", 0.7)]
-    ranked = rank_products(candidates, is_search=True, user_id="new_user")
+    ranked = await rank_products(candidates, is_search=True, user_id="new_user")
     
     assert len(ranked) == 2
     # CF scores should be 0.0 for cold start user
@@ -152,9 +156,10 @@ def test_ranking_cold_start_user(mock_get_client, mock_get_cf_service, mock_get_
         assert breakdown["cf_score"] == 0.0
 
 
+@pytest.mark.asyncio
 @patch('app.services.ranking.features.get_product_features')
 @patch('app.services.recommendation.collaborative.get_collaborative_filtering_service')
-def test_ranking_cf_computation_error(mock_get_cf_service, mock_get_features, mock_product_features):
+async def test_ranking_cf_computation_error(mock_get_cf_service, mock_get_features, mock_product_features):
     """Test ranking when CF computation fails."""
     # Mock CF service that raises error
     mock_cf_service = Mock()
@@ -165,7 +170,7 @@ def test_ranking_cf_computation_error(mock_get_cf_service, mock_get_features, mo
     mock_get_features.return_value = mock_product_features
     
     candidates = [("product1", 0.9), ("product2", 0.7)]
-    ranked = rank_products(candidates, is_search=True, user_id="user1")
+    ranked = await rank_products(candidates, is_search=True, user_id="user1")
     
     # Should still return results with cf_score=0.0
     assert len(ranked) == 2

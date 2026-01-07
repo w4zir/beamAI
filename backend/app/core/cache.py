@@ -122,7 +122,8 @@ class CacheClient:
         Returns:
             Cached value if found, None if miss or error
         """
-        if not _redis_pool:
+        client = get_redis_client()
+        if not client:
             return None
         
         # Check circuit breaker
@@ -134,10 +135,10 @@ class CacheClient:
             # Use circuit breaker protection
             if self.circuit_breaker:
                 value = await self.circuit_breaker.call_async(
-                    _redis_pool.get, key
+                    client.get, key
                 )
             else:
-                value = await _redis_pool.get(key)
+                value = await client.get(key)
             
             if value is None:
                 return None
@@ -182,7 +183,8 @@ class CacheClient:
         Returns:
             True if successful, False otherwise
         """
-        if not _redis_pool:
+        client = get_redis_client()
+        if not client:
             return False
         
         # Check circuit breaker
@@ -200,10 +202,10 @@ class CacheClient:
             # Use circuit breaker protection
             if self.circuit_breaker:
                 await self.circuit_breaker.call_async(
-                    _redis_pool.setex, key, ttl, serialized
+                    client.setex, key, ttl, serialized
                 )
             else:
-                await _redis_pool.setex(key, ttl, serialized)
+                await client.setex(key, ttl, serialized)
             
             return True
             
@@ -238,7 +240,8 @@ class CacheClient:
         Returns:
             Number of keys deleted
         """
-        if not _redis_pool:
+        client = get_redis_client()
+        if not client:
             return 0
         
         # Check circuit breaker
@@ -249,11 +252,11 @@ class CacheClient:
         try:
             # Use SCAN to find matching keys (more efficient than KEYS)
             deleted_count = 0
-            async for key in _redis_pool.scan_iter(match=pattern):
+            async for key in client.scan_iter(match=pattern):
                 if self.circuit_breaker:
-                    await self.circuit_breaker.call_async(_redis_pool.delete, key)
+                    await self.circuit_breaker.call_async(client.delete, key)
                 else:
-                    await _redis_pool.delete(key)
+                    await client.delete(key)
                 deleted_count += 1
             
             return deleted_count
@@ -281,16 +284,17 @@ class CacheClient:
     
     async def exists(self, key: str) -> bool:
         """Check if key exists in cache."""
-        if not _redis_pool:
+        client = get_redis_client()
+        if not client:
             return False
         
         try:
             if self.circuit_breaker:
                 result = await self.circuit_breaker.call_async(
-                    _redis_pool.exists, key
+                    client.exists, key
                 )
             else:
-                result = await _redis_pool.exists(key)
+                result = await client.exists(key)
             
             return bool(result)
         except (CircuitBreakerOpenError, RedisError):

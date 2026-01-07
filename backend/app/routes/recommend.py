@@ -72,15 +72,26 @@ async def recommend(
             k=k,
         )
         
-        # Verify user exists
-        client = get_supabase_client()
-        if client:
-            user_check = client.table("users").select("id").eq("id", user_id).limit(1).execute()
-            if not user_check.data:
-                logger.warning(
-                    "recommendation_user_not_found",
-                    user_id=user_id,
-                )
+        # Verify user exists (best-effort only). This check must never cause
+        # the endpoint to fail hard; if Supabase is unavailable we log and
+        # continue with an empty recommendation list (graceful degradation).
+        client = None
+        try:
+            client = get_supabase_client()
+            if client:
+                user_check = client.table("users").select("id").eq("id", user_id).limit(1).execute()
+                if not user_check.data:
+                    logger.warning(
+                        "recommendation_user_not_found",
+                        user_id=user_id,
+                    )
+        except Exception as user_check_error:
+            logger.warning(
+                "recommendation_user_check_failed",
+                user_id=user_id,
+                error=str(user_check_error),
+                error_type=type(user_check_error).__name__,
+            )
         
         # Get candidates from recommendation service
         candidate_ids = get_popularity_recommendations(user_id=user_id, limit=k * 2)
